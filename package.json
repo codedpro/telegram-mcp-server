@@ -1,0 +1,55 @@
+{
+  "name": "telegram-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for Telegram. Let Claude, Cursor, Codex, or any AI agent read, search, and send messages on your real Telegram account.",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "telegram",
+    "telegram-mcp",
+    "gramjs",
+    "teleproto",
+    "mtproto",
+    "userbot",
+    "ai-agent",
+    "agentic",
+    "claude",
+    "claude-code",
+    "cursor",
+    "llm-tools"
+  ],
+  "license": "MIT",
+  "author": "codedpro",
+  "type": "module",
+  "bin": {
+    "telegram-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "login": "tsx scripts/login.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "dotenv": "^17.0.0",
+    "input": "^1.0.1",
+    "teleproto": "^1.229.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
