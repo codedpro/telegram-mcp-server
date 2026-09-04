@@ -6,7 +6,7 @@ import { disconnect } from "./telegram.js";
 
 const server = new McpServer({
   name: "telegram-mcp-server",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
 registerTools(server);

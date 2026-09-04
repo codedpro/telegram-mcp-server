@@ -1,6 +1,6 @@
 {
   "name": "telegram-mcp-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server for Telegram. Let Claude, Cursor, Codex, or any AI agent read, search, and send messages on your real Telegram account.",
   "keywords": [
     "mcp",

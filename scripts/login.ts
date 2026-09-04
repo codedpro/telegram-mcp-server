@@ -1,32 +1,34 @@
 /**
- * One-time interactive login. Prints a session string to paste into .env.
- * That string is equivalent to being logged in as you - treat it like a password.
+ * Optional terminal login. The agent can do this for you through the
+ * telegram_login_* tools; use this script if you would rather not type the
+ * code and password into an agent conversation.
+ *
+ * Saves the session to the session file (default ~/.telegram-mcp-server/session).
  */
-import input from "input";
+import { createInterface } from "node:readline/promises";
+import { stdin, stdout } from "node:process";
 import { TelegramClient } from "teleproto";
 import { StringSession } from "teleproto/sessions/index.js";
-import "dotenv/config";
+import { config } from "../src/config.js";
+import { saveSession } from "../src/session.js";
 
-const apiId = Number(process.env.TELEGRAM_API_ID);
-const apiHash = process.env.TELEGRAM_API_HASH;
+const rl = createInterface({ input: stdin, output: stdout });
+const ask = (prompt: string) => rl.question(prompt);
 
-if (!apiId || !apiHash) {
-  console.error("Set TELEGRAM_API_ID and TELEGRAM_API_HASH in .env first.");
-  process.exit(1);
-}
-
-const client = new TelegramClient(new StringSession(""), apiId, apiHash, {
+const client = new TelegramClient(new StringSession(""), config.apiId, config.apiHash, {
   connectionRetries: 5,
 });
 
 await client.start({
-  phoneNumber: () => input.text("Phone number (with country code): "),
-  password: () => input.text("2FA password (blank if none): "),
-  phoneCode: () => input.text("Code you just received: "),
-  onError: (err) => console.error(err),
+  phoneNumber: () => ask("Phone number (with country code): "),
+  password: (hint) => ask(`2FA password${hint ? ` (hint: ${hint})` : ""}: `),
+  phoneCode: () => ask("Code you just received: "),
+  onError: (err) => console.error(err.message),
 });
 
-console.log("\nLogged in. Add this line to your .env:\n");
-console.log(`TELEGRAM_SESSION=${client.session.save()}\n`);
+const file = saveSession((client.session as StringSession).save());
+console.log(`\nLogged in. Session saved to ${file}`);
+console.log("The MCP server will pick it up automatically. Keep that file private: it is a full login.\n");
+rl.close();
 await client.disconnect();
 process.exit(0);
