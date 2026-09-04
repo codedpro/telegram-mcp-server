@@ -30,6 +30,59 @@ export function register(server: McpServer): void {
 
   tool(
     server,
+    "create_folder",
+    {
+      title: "Create a folder",
+      description:
+        "Creates a new folder (tab) containing the given chats. Use this when the folder you wanted is a shared folder (chatlist type), which Telegram does not let you add arbitrary chats to. You must already be a member of each chat.",
+      inputSchema: {
+        title: z.string().min(1).max(24),
+        chats: z.array(z.string().min(1)).min(1).max(100),
+        emoticon: z.string().max(8).default("").describe("Optional folder icon emoji"),
+      },
+    },
+    async ({ title, chats, emoticon }) => {
+      const client = await getAuthorizedClient();
+      const existing = await client.invoke(new Api.messages.GetDialogFilters());
+      const used = new Set<number>();
+      for (const f of existing.filters) {
+        const id = (f as unknown as { id?: number }).id;
+        if (typeof id === "number") used.add(id);
+      }
+      // شناسه‌ی پوشه از ۲ شروع می‌شود؛ ۰ و ۱ رزرو تلگرام‌اند.
+      let id = 2;
+      while (used.has(id)) id += 1;
+
+      const include: Api.TypeInputPeer[] = [];
+      const skipped: { chat: string; reason: string }[] = [];
+      for (const chat of chats as string[]) {
+        try {
+          include.push(await client.getInputEntity(peer(chat)));
+        } catch (err) {
+          skipped.push({ chat, reason: (err as Error).message.slice(0, 80) });
+        }
+      }
+      if (!include.length) throw new Error("None of those chats could be resolved. Join them first.");
+
+      await client.invoke(
+        new Api.messages.UpdateDialogFilter({
+          id,
+          filter: new Api.DialogFilter({
+            id,
+            title: new Api.TextWithEntities({ text: String(title), entities: [] }),
+            emoticon: (emoticon as string) || undefined,
+            pinnedPeers: [],
+            includePeers: include,
+            excludePeers: [],
+          }),
+        }),
+      );
+      return { created: title, id, added: include.length, skipped };
+    },
+  );
+
+  tool(
+    server,
     "add_to_folder",
     {
       title: "Add chats to a folder",
