@@ -9,7 +9,7 @@ import {
 } from "../scans.js";
 import * as ledgerStore from "../ledger.js";
 import { getAuthorizedClient } from "../telegram.js";
-import { requireConfirm, tool } from "./util.js";
+import { peer, requireConfirm, tool } from "./util.js";
 
 const categoryArg = z
   .array(z.enum(["SEO", "AI", "Web", "Software"]))
@@ -26,6 +26,64 @@ export function register(server: McpServer): void {
       inputSchema: {},
     },
     async () => listFolders(await (await getAuthorizedClient()).invoke(new Api.messages.GetDialogFilters())),
+  );
+
+  tool(
+    server,
+    "add_to_folder",
+    {
+      title: "Add chats to a folder",
+      description:
+        "Adds chats to an existing folder (tab). You must already be a member of each chat — join first with telegram_join_chat. Shared folders (chatlist type) cannot be edited this way.",
+      inputSchema: {
+        folder: z.string().min(1),
+        chats: z.array(z.string().min(1)).min(1).max(50).describe("Chat ids, @usernames"),
+      },
+    },
+    async ({ folder, chats }) => {
+      const client = await getAuthorizedClient();
+      const res = await client.invoke(new Api.messages.GetDialogFilters());
+      const title = (f: Api.TypeDialogFilter) => {
+        const t = (f as { title?: { text?: string } | string }).title;
+        return typeof t === "string" ? t : (t?.text ?? "");
+      };
+      const target = res.filters.find((f) => title(f).toLowerCase() === String(folder).trim().toLowerCase());
+      if (!target) throw new Error(`No folder named "${folder}".`);
+      if (!(target instanceof Api.DialogFilter)) {
+        throw new Error(`"${folder}" is a shared folder (${target.className}) and cannot be edited here.`);
+      }
+
+      const existing = new Set<string>();
+      for (const p of [...target.pinnedPeers, ...target.includePeers, ...target.excludePeers]) {
+        existing.add(String(await client.getPeerId(p)));
+      }
+
+      const added: string[] = [];
+      const skipped: { chat: string; reason: string }[] = [];
+      for (const chat of chats as string[]) {
+        try {
+          const input = await client.getInputEntity(peer(chat));
+          const id = String(await client.getPeerId(input));
+          if (existing.has(id)) { skipped.push({ chat, reason: "already in the folder" }); continue; }
+          target.includePeers.push(input);
+          existing.add(id);
+          added.push(chat);
+        } catch (err) {
+          // معمولاً یعنی عضو گروه نیستیم و دسترسی به آن نداریم.
+          skipped.push({ chat, reason: (err as Error).message.slice(0, 90) });
+        }
+      }
+
+      if (added.length) {
+        await client.invoke(new Api.messages.UpdateDialogFilter({ id: target.id, filter: target }));
+      }
+      return {
+        folder: title(target),
+        added,
+        skipped,
+        totalInFolder: target.pinnedPeers.length + target.includePeers.length,
+      };
+    },
   );
 
   tool(
