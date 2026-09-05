@@ -6,6 +6,7 @@ import {
   daysSince, lastPostTo, loadCopy, loadGroups, loadLedger, planAhead, planNext,
   recordPost, render, saveGroups,
 } from "../campaign.js";
+import { gate } from "../throttle.js";
 import { getAuthorizedClient } from "../telegram.js";
 import { activeAccount, listAccounts } from "../session.js";
 import { peer, tool } from "./util.js";
@@ -118,6 +119,10 @@ export function register(server: McpServer): void {
       // استخرِ حساب‌ها یعنی لازم نیست حسابِ فعال را عوض کنیم؛ همان حسابی که این
       // گروه به آن سپرده شده مستقیماً پست می‌کند.
       const client = await getAuthorizedClient(plan.group.account);
+      // این مسیر مستقیم به کلاینت می‌زند، پس باید خودش از گیت رد شود؛ وگرنه سه آگهی
+      // در بیست دقیقه می‌رود بیرون، که دقیقاً همان الگویی است که گیت برای جلوگیری از
+      // آن نوشته شد.
+      const paced = await gate("campaign_post");
       try {
         // متن‌تنها و متن+تصویر را قاطی می‌کنیم: شش آگهیِ پشت‌سرهم با یک قالبِ ثابت،
         // خودش یک الگوی قابلِ تشخیص است.
@@ -137,6 +142,7 @@ export function register(server: McpServer): void {
           group: "@" + plan.group.username,
           variant: plan.variant.id,
           withImage: Boolean(plan.variant.image),
+          waitedMs: paced.waitedMs,
           messageId: sent.id,
         };
       } catch (err) {
