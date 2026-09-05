@@ -53,8 +53,10 @@ export interface Region {
 export interface Offer {
   regions: Record<string, Region>;
   contact: string;
+  /** Real, reachable sites. Proof belongs in the ad, not behind a DM. */
   examples: string[];
   includes: string[];
+  guarantees: string[];
 }
 
 export interface PostRecord {
@@ -89,7 +91,7 @@ export const loadGroups = () => readJson<{ groups: Group[] }>("roster.json", { g
 export const saveGroups = (groups: Group[]) => writeJson("roster.json", { groups });
 export const loadCopy = () =>
   readJson<{ offer: Offer; variants: Variant[] }>("copy.json", {
-    offer: { regions: {}, contact: "", examples: [], includes: [] },
+    offer: { regions: {}, contact: "", examples: [], includes: [], guarantees: [] },
     variants: [],
   });
 export const saveCopy = (copy: { offer: Offer; variants: Variant[] }) => writeJson("copy.json", copy);
@@ -111,7 +113,8 @@ export function render(text: string, offer: Offer, region: string): string {
     .replaceAll("{{setup}}", prices.setup)
     .replaceAll("{{contact}}", offer.contact)
     .replaceAll("{{examples}}", offer.examples.join("\n"))
-    .replaceAll("{{includes}}", offer.includes.map((i) => `• ${i}`).join("\n"));
+    .replaceAll("{{includes}}", offer.includes.map((i) => `• ${i}`).join("\n"))
+    .replaceAll("{{guarantees}}", offer.guarantees.map((g) => `✅ ${g}`).join("\n"));
 }
 
 const successful = (ledger: Ledger) => ledger.posts.filter((p) => !p.error);
