@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
@@ -121,7 +123,12 @@ export function register(server: McpServer): void {
 
       const client = await getAuthorizedClient();
       try {
-        const sent = await client.sendMessage(peer("@" + plan.group.username), { message: text });
+        // متن‌تنها و متن+تصویر را قاطی می‌کنیم: شش آگهیِ پشت‌سرهم با یک قالبِ ثابت،
+        // خودش یک الگوی قابلِ تشخیص است.
+        const target = peer("@" + plan.group.username);
+        const sent = plan.variant.image
+          ? await client.sendFile(target, { file: resolve(plan.variant.image), caption: text })
+          : await client.sendMessage(target, { message: text });
         recordPost(ledger, {
           group: plan.group.username,
           variant: plan.variant.id,
@@ -129,7 +136,13 @@ export function register(server: McpServer): void {
           at: new Date().toISOString(),
           messageId: sent.id,
         });
-        return { posted: true, group: "@" + plan.group.username, variant: plan.variant.id, messageId: sent.id };
+        return {
+          posted: true,
+          group: "@" + plan.group.username,
+          variant: plan.variant.id,
+          withImage: Boolean(plan.variant.image),
+          messageId: sent.id,
+        };
       } catch (err) {
         const message = (err as Error).message;
         recordPost(ledger, {

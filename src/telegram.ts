@@ -1,9 +1,20 @@
 import { TelegramClient } from "teleproto";
 import { StringSession } from "teleproto/sessions/index.js";
 import { config } from "./config.js";
-import { loadSession, saveSession, sessionSource } from "./session.js";
+import { activeAccount, loadSession, saveSession, sessionSource } from "./session.js";
 
 let client: TelegramClient | undefined;
+/**
+ * Which saved account the live client actually belongs to.
+ *
+ * Without this, persistSession() wrote the client's session string into
+ * whatever account happened to be active at that moment. Switch accounts and
+ * then shut down, and the outgoing session lands in the incoming account's
+ * file — which is exactly how one account's session overwrote another's here,
+ * destroying the original. The client's identity is a property of the client,
+ * never of the active-account pointer.
+ */
+let clientAccount: string | undefined;
 let authorized = false;
 
 export class NotLoggedInError extends Error {
@@ -26,6 +37,7 @@ export async function getClient(): Promise<TelegramClient> {
   );
   await created.connect();
   client = created;
+  clientAccount = activeAccount();
   return created;
 }
 
@@ -53,21 +65,25 @@ export function markAuthorized(): void {
 /** Writes the current session string to the session file. */
 export function persistSession(account?: string): string {
   if (!client) throw new Error("No client to persist.");
-  return saveSession((client.session as StringSession).save(), account);
+  const target = account ?? clientAccount;
+  if (!target) throw new Error("No account is associated with the live client; refusing to guess where to save it.");
+  return saveSession((client.session as StringSession).save(), target);
 }
 
 export async function resetClient(): Promise<void> {
   const current = client;
   client = undefined;
+  clientAccount = undefined;
   authorized = false;
   await current?.disconnect();
 }
 
 export async function disconnect(): Promise<void> {
   // Keep the file fresh: the library may have migrated data centers since login.
-  if (client && authorized && sessionSource() === "file") {
+  // فقط به حسابِ خودِ همین کلاینت بنویس، نه به حسابِ فعالِ فعلی.
+  if (client && clientAccount && authorized && sessionSource() === "file") {
     try {
-      persistSession();
+      persistSession(clientAccount);
     } catch {
       // best effort on shutdown
     }
