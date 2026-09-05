@@ -29,6 +29,7 @@ export function register(server: McpServer): void {
       return {
         offer: copy.offer,
         variants: copy.variants.length,
+        regions: Object.keys(copy.offer.regions ?? {}),
         activeAccount: activeAccount(),
         accounts: listAccounts().map((a) => a.name),
         totalPosts: ok.length,
@@ -45,6 +46,7 @@ export function register(server: McpServer): void {
             daysSince: Number.isFinite(days) ? Math.round(days * 10) / 10 : null,
             dueIn: g.enabled ? Math.max(0, Math.round((g.minDaysBetween - days) * 10) / 10) : null,
             due: g.enabled && days >= g.minDaysBetween,
+            region: g.region,
             copySeen: `${seen.size}/${copy.variants.length}`,
             note: g.note,
           };
@@ -77,7 +79,7 @@ export function register(server: McpServer): void {
           variant: p.variant.id,
           angle: p.variant.angle,
           reason: p.reason,
-          ...(showText ? { text: render(p.variant.text, copy.offer) } : {}),
+          ...(showText ? { text: render(p.variant.text, copy.offer, p.group.region) } : {}),
         })),
       };
     },
@@ -112,7 +114,7 @@ export function register(server: McpServer): void {
       if (!plan) {
         return { posted: false, reason: "Nothing is due. Every enabled group is still inside its cooldown." };
       }
-      const text = render(plan.variant.text, copy.offer);
+      const text = render(plan.variant.text, copy.offer, plan.group.region);
       if (dryRun) {
         return { posted: false, dryRun: true, group: "@" + plan.group.username, variant: plan.variant.id, reason: plan.reason, text };
       }

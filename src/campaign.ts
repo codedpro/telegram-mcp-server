@@ -22,6 +22,8 @@ const file = (name: string) => join(campaignDir(), name);
 export interface Group {
   username: string;
   title: string;
+  /** Which price list this group sees. Quoting pounds to Istanbul reads as careless. */
+  region: string;
   members: number;
   /** Telegram's own floor between messages in this group. */
   slowmodeSeconds: number;
@@ -41,10 +43,18 @@ export interface Variant {
   image?: string | null;
 }
 
+/** One price list. Every group resolves to exactly one of these. */
+export interface Region {
+  monthly: string;
+  setup: string;
+  currencyNote?: string;
+}
+
 export interface Offer {
-  starterPrice: string;
-  shopPrice: string;
+  regions: Record<string, Region>;
   contact: string;
+  examples: string[];
+  includes: string[];
 }
 
 export interface PostRecord {
@@ -79,19 +89,29 @@ export const loadGroups = () => readJson<{ groups: Group[] }>("roster.json", { g
 export const saveGroups = (groups: Group[]) => writeJson("roster.json", { groups });
 export const loadCopy = () =>
   readJson<{ offer: Offer; variants: Variant[] }>("copy.json", {
-    offer: { starterPrice: "", shopPrice: "", contact: "" },
+    offer: { regions: {}, contact: "", examples: [], includes: [] },
     variants: [],
   });
 export const saveCopy = (copy: { offer: Offer; variants: Variant[] }) => writeJson("copy.json", copy);
 export const loadLedger = () => readJson<Ledger>("ledger.json", { posts: [] });
 export const saveLedger = (ledger: Ledger) => writeJson("ledger.json", ledger);
 
-/** Fills {{price}}, {{shopPrice}} and {{contact}} so the offer lives in one place. */
-export function render(text: string, offer: Offer): string {
+/**
+ * Fills the offer into a variant for one region.
+ *
+ * The region is the point: the first run of this campaign quoted British pounds
+ * into two Istanbul groups, which tells the reader immediately that the ad was
+ * not written for them.
+ */
+export function render(text: string, offer: Offer, region: string): string {
+  const prices = offer.regions[region] ?? Object.values(offer.regions)[0];
+  if (!prices) throw new Error(`No price list for region "${region}".`);
   return text
-    .replaceAll("{{price}}", offer.starterPrice)
-    .replaceAll("{{shopPrice}}", offer.shopPrice)
-    .replaceAll("{{contact}}", offer.contact);
+    .replaceAll("{{monthly}}", prices.monthly)
+    .replaceAll("{{setup}}", prices.setup)
+    .replaceAll("{{contact}}", offer.contact)
+    .replaceAll("{{examples}}", offer.examples.join("\n"))
+    .replaceAll("{{includes}}", offer.includes.map((i) => `• ${i}`).join("\n"));
 }
 
 const successful = (ledger: Ledger) => ledger.posts.filter((p) => !p.error);
