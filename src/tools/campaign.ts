@@ -115,13 +115,9 @@ export function register(server: McpServer): void {
       if (dryRun) {
         return { posted: false, dryRun: true, group: "@" + plan.group.username, variant: plan.variant.id, reason: plan.reason, text };
       }
-      if (plan.group.account !== activeAccount()) {
-        throw new Error(
-          `@${plan.group.username} is assigned to account "${plan.group.account}" but "${activeAccount()}" is active. Switch with telegram_switch_account, or reassign with telegram_campaign_reassign.`,
-        );
-      }
-
-      const client = await getAuthorizedClient();
+      // استخرِ حساب‌ها یعنی لازم نیست حسابِ فعال را عوض کنیم؛ همان حسابی که این
+      // گروه به آن سپرده شده مستقیماً پست می‌کند.
+      const client = await getAuthorizedClient(plan.group.account);
       try {
         // متن‌تنها و متن+تصویر را قاطی می‌کنیم: شش آگهیِ پشت‌سرهم با یک قالبِ ثابت،
         // خودش یک الگوی قابلِ تشخیص است.

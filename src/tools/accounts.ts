@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Api } from "teleproto";
 import { formatUser } from "../format.js";
 import { activeAccount, listAccounts, setActiveAccount } from "../session.js";
-import { getClient, resetClient } from "../telegram.js";
+import { connectAll, connectedAccounts, getClient, isAuthorized } from "../telegram.js";
 import { tool } from "./util.js";
 
 export function register(server: McpServer): void {
@@ -19,10 +19,36 @@ export function register(server: McpServer): void {
     async () => {
       const active = activeAccount();
       const accounts = listAccounts();
+      const live = new Map(connectedAccounts().map((c) => [c.account, c.authorized]));
       return {
         active,
-        accounts: accounts.map((a) => ({ ...a, isActive: a.name === active })),
+        accounts: accounts.map((a) => ({
+          ...a,
+          isActive: a.name === active,
+          connected: live.has(a.name),
+          authorized: live.get(a.name) ?? null,
+        })),
         note: accounts.length ? undefined : "No saved accounts. Use telegram_login_start to add one.",
+      };
+    },
+  );
+
+  tool(
+    server,
+    "connect_all_accounts",
+    {
+      title: "Connect every saved account",
+      description:
+        "Brings every saved account online at once and keeps them connected, so acting as a different account needs no re-login and no reconnect. Tools that accept an `account` argument can then target any of them directly.",
+      inputSchema: {},
+    },
+    async () => {
+      const results = await connectAll();
+      return {
+        connected: results.filter((r) => r.connected && r.authorized).map((r) => r.account),
+        needsLogin: results.filter((r) => r.connected && !r.authorized).map((r) => r.account),
+        failed: results.filter((r) => !r.connected),
+        active: activeAccount(),
       };
     },
   );
@@ -38,9 +64,9 @@ export function register(server: McpServer): void {
     },
     async ({ name }) => {
       const chosen = setActiveAccount(name as string);
-      await resetClient();
-      const me = (await (await getClient()).getMe()) as Api.User;
-      return { active: chosen, user: formatUser(me) };
+      // استخر باز می‌مانَد: تعویضِ حساب فقط اشاره‌گر را جابه‌جا می‌کند، نه اتصال را.
+      const me = (await (await getClient(chosen)).getMe()) as Api.User;
+      return { active: chosen, user: formatUser(me), connected: connectedAccounts() };
     },
   );
 }

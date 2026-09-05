@@ -109,15 +109,37 @@ export function loadSession(name = activeAccount()): string {
   }
 }
 
-/** Owner-only file: the session string is a full login to the account. */
+/**
+ * Owner-only file: the session string is a full login to the account.
+ *
+ * Keeps one backup of the previous, different value. A session file is the only
+ * copy of a login — overwrite it with the wrong account's string and that login
+ * is gone, which has already happened once here. The backup makes that
+ * recoverable instead of terminal.
+ */
 export function saveSession(value: string, name = activeAccount()): string {
   const clean = safe(name);
   ensureDir();
   const file = sessionPath(clean);
+  try {
+    const previous = readFileSync(file, "utf8").trim();
+    if (previous && previous !== value.trim()) {
+      writeFileSync(`${file}.bak`, previous + "\n", { mode: 0o600 });
+    }
+  } catch {
+    // هنوز فایلی نیست — چیزی برای پشتیبان‌گیری وجود ندارد.
+  }
   writeFileSync(file, value + "\n", { mode: 0o600 });
   chmodSync(file, 0o600);
-  writeFileSync(activePath(), clean + "\n", { mode: 0o600 });
+  if (!existsSync(activePath())) writeFileSync(activePath(), clean + "\n", { mode: 0o600 });
   return file;
+}
+
+/** Makes an account active. Login does this explicitly; saving no longer does. */
+export function markActive(name: string): void {
+  const clean = safe(name);
+  ensureDir();
+  writeFileSync(activePath(), clean + "\n", { mode: 0o600 });
 }
 
 export function saveAccountMeta(meta: AccountMeta): void {

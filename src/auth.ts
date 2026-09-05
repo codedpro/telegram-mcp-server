@@ -2,7 +2,7 @@ import { Api } from "teleproto";
 import { computeCheck } from "teleproto/Password.js";
 import { config } from "./config.js";
 import { formatUser } from "./format.js";
-import { activeAccount, clearSession, listAccounts, saveAccountMeta, sessionSource } from "./session.js";
+import { activeAccount, clearSession, listAccounts, markActive, saveAccountMeta, sessionSource } from "./session.js";
 import {
   getClient,
   isAuthorized,
@@ -32,10 +32,12 @@ const nextStep: Record<Stage, string> = {
 };
 
 async function finishLogin() {
-  markAuthorized();
   const account = state.account ?? activeAccount();
+  markAuthorized(account);
   const file = persistSession(account);
-  const me = (await (await getClient()).getMe()) as Api.User;
+  // ورود، حسابِ تازه را فعال می‌کند؛ ذخیره‌ی نشست دیگر این کار را نمی‌کند.
+  markActive(account);
+  const me = (await (await getClient(account)).getMe()) as Api.User;
   const user = formatUser(me);
   saveAccountMeta({ name: account, id: user.id, username: user.username, firstName: user.firstName, phone: user.phone });
   state = { stage: "logged_in", account };
@@ -75,7 +77,8 @@ export async function loginStatus() {
 
 export async function loginStart(phone: string, forceSms = false, account?: string) {
   if (!account && (await isAuthorized())) return loginStatus();
-  const client = await getClient();
+  const target = account ?? activeAccount();
+  const client = await getClient(target);
   const result = await client.sendCode(
     { apiId: config.apiId, apiHash: config.apiHash },
     phone,
@@ -83,7 +86,7 @@ export async function loginStart(phone: string, forceSms = false, account?: stri
   );
   state = {
     stage: "code_sent",
-    account: account ?? activeAccount(),
+    account: target,
     phone,
     phoneCodeHash: result.phoneCodeHash,
     codeVia: result.isCodeViaApp ? "app" : "sms",
@@ -101,7 +104,7 @@ export async function loginCode(code: string) {
   if (state.stage !== "code_sent" || !state.phone || !state.phoneCodeHash) {
     throw new Error(`No login in progress. ${nextStep.logged_out}`);
   }
-  const client = await getClient();
+  const client = await getClient(state.account);
   try {
     const result = await client.invoke(
       new Api.auth.SignIn({
@@ -141,7 +144,7 @@ export async function loginPassword(password: string) {
   if (state.stage !== "password_needed") {
     throw new Error(`Telegram has not asked for a password. ${nextStep[state.stage]}`);
   }
-  const client = await getClient();
+  const client = await getClient(state.account);
   const srp = await client.invoke(new Api.account.GetPassword());
   try {
     await client.invoke(
@@ -159,7 +162,7 @@ export async function loginPassword(password: string) {
 
 export async function logout(account?: string) {
   const target = account ?? activeAccount();
-  const client = await getClient();
+  const client = await getClient(target);
   let remote = false;
   try {
     remote = await client.logOut();
@@ -167,7 +170,7 @@ export async function logout(account?: string) {
     // Session may already be invalid; still clear locally.
   }
   clearSession(target);
-  await resetClient();
+  await resetClient(target);
   state = { stage: "logged_out" };
   return {
     stage: state.stage,
