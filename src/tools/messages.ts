@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Api } from "teleproto";
 import { assertWritable } from "../config.js";
+import { gate } from "../throttle.js";
 import { formatMessage } from "../format.js";
 import { getAuthorizedClient } from "../telegram.js";
 import { peer, requireConfirm, tool } from "./util.js";
@@ -142,6 +143,7 @@ export function register(server: McpServer): void {
     async ({ chat, message, replyTo, parseMode, silent, linkPreview, scheduleAt }) => {
       assertWritable(chat as string);
       const client = await getAuthorizedClient();
+      const paced = await gate("send_message");
       const sent = await client.sendMessage(peer(chat as string), {
         message: message as string,
         replyTo: replyTo as number | undefined,
@@ -150,7 +152,7 @@ export function register(server: McpServer): void {
         linkPreview: linkPreview as boolean,
         schedule: scheduleAt ? Math.floor(new Date(scheduleAt as string).getTime() / 1000) : undefined,
       });
-      return { sent: true, message: formatMessage(sent) };
+      return { sent: true, waitedMs: paced.waitedMs, message: formatMessage(sent) };
     },
   );
 
@@ -214,6 +216,7 @@ export function register(server: McpServer): void {
     async ({ fromChat, messageIds, toChat, silent, dropAuthor }) => {
       assertWritable(toChat as string);
       const client = await getAuthorizedClient();
+      await gate("forward_messages");
       const forwarded = await client.forwardMessages(peer(toChat as string), {
         messages: messageIds as number[],
         fromPeer: peer(fromChat as string),

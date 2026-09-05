@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Api } from "teleproto";
 import { config } from "../config.js";
 import { formatUser, isoDate } from "../format.js";
+import { minIntervalMs, status as throttleStatus } from "../throttle.js";
 import { getAuthorizedClient } from "../telegram.js";
 import { tool } from "./util.js";
 
@@ -74,6 +75,26 @@ export function register(server: McpServer): void {
       }
       const me = (await client.getMe()) as Api.User;
       return { changed, user: formatUser(me) };
+    },
+  );
+
+  tool(
+    server,
+    "rate_status",
+    {
+      title: "Outward action rate gate",
+      description:
+        "Shows the enforced minimum gap between outward actions (sending a message or file, joining a chat), when the last one happened, and how long until the next is allowed. The gap is enforced inside the server and persists across restarts, so no script can bypass it.",
+      inputSchema: {},
+    },
+    async () => {
+      const s = throttleStatus();
+      return {
+        ...s,
+        minIntervalMinutes: Math.round(minIntervalMs() / 60000),
+        readyInSeconds: Math.ceil(s.readyIn / 1000),
+        note: "Change with TELEGRAM_MIN_ACTION_INTERVAL_MS (milliseconds). 0 disables the gate.",
+      };
     },
   );
 }

@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Api } from "teleproto";
 import { assertWritable, config } from "../config.js";
+import { gate } from "../throttle.js";
 import { formatMessage, summarizeMedia } from "../format.js";
 import { getAuthorizedClient } from "../telegram.js";
 import { peer, tool } from "./util.js";
@@ -69,6 +70,7 @@ export function register(server: McpServer): void {
       const file = resolve(path as string);
       statSync(file);
       const client = await getAuthorizedClient();
+      const paced = await gate("send_file");
       const sent = await client.sendFile(peer(chat as string), {
         file,
         caption: caption as string | undefined,
@@ -81,7 +83,7 @@ export function register(server: McpServer): void {
           ? [new Api.DocumentAttributeFilename({ fileName: basename(file) })]
           : undefined,
       });
-      return { sent: true, fileName: basename(file), extension: extname(file), message: formatMessage(sent) };
+      return { sent: true, waitedMs: paced.waitedMs, fileName: basename(file), extension: extname(file), message: formatMessage(sent) };
     },
   );
 }

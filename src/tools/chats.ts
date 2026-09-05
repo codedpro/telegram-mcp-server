@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Api } from "teleproto";
 import { formatChat, formatEntity, formatMessage, formatUser, isoDate, toPlain } from "../format.js";
+import { gate } from "../throttle.js";
 import { getAuthorizedClient } from "../telegram.js";
 import { peer, requireConfirm, tool } from "./util.js";
 
@@ -202,13 +203,14 @@ export function register(server: McpServer): void {
     },
     async ({ target }) => {
       const client = await getAuthorizedClient();
+      const paced = await gate("join_chat");
       const value = (target as string).trim();
       const invite = value.match(/(?:t\.me\/(?:joinchat\/|\+)|^\+)([\w-]+)/);
       const result = invite
         ? await client.importChatInvite(invite[1])
         : await client.joinChannel(value.replace(/^https?:\/\/t\.me\//, "").replace(/^@/, ""));
       const chats = ((result as unknown as { chats?: Api.TypeChat[] }).chats ?? []).map((c) => formatEntity(c));
-      return { joined: true, chats };
+      return { joined: true, waitedMs: paced.waitedMs, chats };
     },
   );
 
