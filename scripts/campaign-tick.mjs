@@ -30,7 +30,13 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const rosterPath = join(root, "data", "campaign", "roster.json");
 
-const stamp = () => new Date().toISOString().replace("T", " ").slice(0, 19);
+/**
+ * Local time, not UTC. cron fires on the machine's clock, so a UTC log makes
+ * every entry look like it ran at the wrong hour and sends you hunting for a
+ * scheduling bug that is not there.
+ */
+const stamp = () =>
+  new Date().toLocaleString("sv-SE", { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
 const log = (msg) => {
   const line = `${stamp()}  ${msg}`;
   console.log(line);
@@ -96,9 +102,20 @@ async function main() {
     }
 
     const message = result.text.replace(/\s+/g, " ");
+    // گروه‌هایی که برای پست‌کردن پول می‌گیرند، با تلاش دوباره رایگان نمی‌شوند.
+    if (/ALLOW_PAYMENT_REQUIRED|CHAT_SEND_PLAIN_FORBIDDEN/.test(message)) {
+      const off = disableGroup(plan.group.replace(/^@/, ""), "charges to post: " + message.slice(0, 70));
+      log(`${plan.group}: paid posting${off ? " — disabled in roster" : ""}`);
+      return;
+    }
     if (/CHAT_WRITE_FORBIDDEN|USER_BANNED_IN_CHANNEL|CHANNEL_PRIVATE/.test(message)) {
       const off = disableGroup(plan.group.replace(/^@/, ""), message.slice(0, 90));
       log(`${plan.group}: cannot post${off ? " — disabled in roster" : ""} (${message.slice(0, 90)})`);
+      return;
+    }
+    // slowmode یعنی «الان نه»، نه «هرگز». گروه سالم است؛ نوبتِ بعدی می‌گیردش.
+    if (/SLOWMODE_WAIT/.test(message)) {
+      log(`${plan.group}: slow mode, skipping this tick`);
       return;
     }
     if (/PEER_FLOOD|FLOOD_WAIT/.test(message)) {

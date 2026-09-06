@@ -130,9 +130,21 @@ export function register(server: McpServer): void {
         // متن‌تنها و متن+تصویر را قاطی می‌کنیم: شش آگهیِ پشت‌سرهم با یک قالبِ ثابت،
         // خودش یک الگوی قابلِ تشخیص است.
         const target = peer("@" + plan.group.username);
-        const sent = plan.variant.image
-          ? await client.sendFile(target, { file: resolve(plan.variant.image), caption: text })
-          : await client.sendMessage(target, { message: text });
+        let sent;
+        let droppedImage = false;
+        if (plan.variant.image) {
+          try {
+            sent = await client.sendFile(target, { file: resolve(plan.variant.image), caption: text });
+          } catch (err) {
+            // بعضی گروه‌ها متن را می‌پذیرند ولی عکس را نه. آگهی را دور نمی‌ریزیم؛
+            // بدون تصویر می‌فرستیم، که هنوز کاملاً خواناست.
+            if (!/CHAT_SEND_PHOTOS_FORBIDDEN|CHAT_SEND_MEDIA_FORBIDDEN/.test((err as Error).message)) throw err;
+            sent = await client.sendMessage(target, { message: text });
+            droppedImage = true;
+          }
+        } else {
+          sent = await client.sendMessage(target, { message: text });
+        }
         recordPost(ledger, {
           group: plan.group.username,
           variant: plan.variant.id,
@@ -144,7 +156,8 @@ export function register(server: McpServer): void {
           posted: true,
           group: "@" + plan.group.username,
           variant: plan.variant.id,
-          withImage: Boolean(plan.variant.image),
+          withImage: Boolean(plan.variant.image) && !droppedImage,
+          imageDropped: droppedImage || undefined,
           waitedMs: paced.waitedMs,
           messageId: sent.id,
         };
