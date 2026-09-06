@@ -95,9 +95,10 @@ export function register(server: McpServer): void {
       inputSchema: {
         dryRun: z.boolean().default(false),
         group: z.string().optional().describe("Force a specific group instead of the scheduler's pick"),
+        force: z.boolean().default(false).describe("Ignore the per-group cooldown. The rate gate still applies. Manual use only — the cooldown is what stops a group being spammed."),
       },
     },
-    async ({ dryRun, group }) => {
+    async ({ dryRun, group, force }) => {
       const groups = loadGroups();
       const copy = loadCopy();
       const ledger = loadLedger();
@@ -107,9 +108,9 @@ export function register(server: McpServer): void {
             const g = groups.find((x) => x.username === String(group).replace(/^@/, ""));
             if (!g) throw new Error(`"${group}" is not in the roster.`);
             if (!g.enabled) throw new Error(`@${g.username} is disabled: ${g.note ?? "no reason recorded"}`);
-            return planNext([g], copy, ledger);
+            return planNext([g], copy, ledger, new Set(), force as boolean);
           })()
-        : planNext(groups, copy, ledger);
+        : planNext(groups, copy, ledger, new Set(), force as boolean);
 
       if (!plan) {
         return { posted: false, reason: "Nothing is due. Every enabled group is still inside its cooldown." };

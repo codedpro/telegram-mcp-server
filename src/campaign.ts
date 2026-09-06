@@ -147,13 +147,15 @@ export function planNext(
   copy: { offer: Offer; variants: Variant[] },
   ledger: Ledger,
   exclude: Set<string> = new Set(),
+  /** Manual override: ignore the per-group cooldown. The rate gate still applies. */
+  ignoreCooldown = false,
 ): Plan | null {
   if (!copy.variants.length) return null;
 
   const due = groups
     .filter((g) => g.enabled && !exclude.has(g.username))
     .map((g) => ({ g, days: daysSince(lastPostTo(ledger, g.username)?.at) }))
-    .filter((x) => x.days >= x.g.minDaysBetween)
+    .filter((x) => ignoreCooldown || x.days >= x.g.minDaysBetween)
     .sort((a, b) => b.days - a.days);
 
   if (!due.length) return null;
