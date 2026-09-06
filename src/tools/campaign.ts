@@ -177,6 +177,63 @@ export function register(server: McpServer): void {
 
   tool(
     server,
+    "campaign_check_survival",
+    {
+      title: "Check which groups keep our ads",
+      description:
+        "Re-reads every ad this campaign posted and reports whether it is still there. Groups that delete ads are the single biggest waste in a rotation — the post costs a rate-gate slot, risks the account, and reaches nobody. Optionally disables groups whose deletion rate is at or above a threshold.",
+      inputSchema: {
+        minPosts: z.number().int().min(1).max(20).default(2).describe("Only judge a group once it has this many posts to judge on"),
+        disableAtRate: z.number().min(0).max(1).default(1).describe("Disable a group whose deleted share is at least this. 1 means only groups deleting everything."),
+        apply: z.boolean().default(false).describe("Actually disable; otherwise report only"),
+      },
+    },
+    async ({ minPosts, disableAtRate, apply }) => {
+      const groups = loadGroups();
+      const ledger = loadLedger();
+      const posts = ledger.posts.filter((p) => !p.error && p.messageId);
+
+      const byGroup = new Map<string, { alive: number; deleted: number }>();
+      for (const p of posts) {
+        const client = await getAuthorizedClient(
+          groups.find((g) => g.username === p.group)?.account ?? "default",
+        );
+        let alive = false;
+        try {
+          const found = await client.getMessages(peer("@" + p.group), { ids: [p.messageId!] });
+          alive = Boolean(found[0] && (found[0].message ?? "").length);
+        } catch {
+          alive = false;
+        }
+        const tally = byGroup.get(p.group) ?? { alive: 0, deleted: 0 };
+        if (alive) tally.alive += 1;
+        else tally.deleted += 1;
+        byGroup.set(p.group, tally);
+      }
+
+      const report = [...byGroup.entries()].map(([username, t]) => {
+        const total = t.alive + t.deleted;
+        return { group: "@" + username, posts: total, alive: t.alive, deleted: t.deleted, deletedRate: total ? t.deleted / total : 0 };
+      }).sort((a, b) => b.deletedRate - a.deletedRate);
+
+      const disabled: string[] = [];
+      if (apply) {
+        for (const row of report) {
+          if (row.posts < (minPosts as number) || row.deletedRate < (disableAtRate as number)) continue;
+          const g = groups.find((x) => "@" + x.username === row.group);
+          if (!g || !g.enabled) continue;
+          g.enabled = false;
+          g.note = `AUTO-DISABLED: deleted ${row.deleted}/${row.posts} ads`;
+          disabled.push(row.group);
+        }
+        if (disabled.length) saveGroups(groups);
+      }
+      return { checked: posts.length, groups: report, disabled, applied: Boolean(apply) };
+    },
+  );
+
+  tool(
+    server,
     "campaign_reassign",
     {
       title: "Move groups to another account",
