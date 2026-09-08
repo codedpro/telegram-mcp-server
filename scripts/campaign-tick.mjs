@@ -29,6 +29,19 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const rosterPath = join(root, "data", "campaign", "roster.json");
+const healthPath = join(root, "data", "campaign", "health.json");
+
+/** Stop after this many consecutive failed posts — a full day of hourly ticks. */
+const FAILURE_LIMIT = 24;
+
+const readHealth = () => {
+  try {
+    return JSON.parse(readFileSync(healthPath, "utf8"));
+  } catch {
+    return { consecutiveFailures: 0 };
+  }
+};
+const writeHealth = (h) => writeFileSync(healthPath, JSON.stringify(h, null, 2));
 
 /**
  * Local time, not UTC. cron fires on the machine's clock, so a UTC log makes
@@ -80,6 +93,28 @@ async function main() {
     return { err: Boolean(res.isError), text: res.content[0].text };
   };
 
+  // مدارشکن: اگر یک شبانه‌روزِ کامل هر تلاش شکست خورده، ادامه دادن فقط حساب را
+  // می‌سوزانَد. چیزی که ۲۴ بار پشت‌سرهم شکست خورده، بارِ ۲۵ام درست نمی‌شود.
+  const health = readHealth();
+  if (health.pausedAt) {
+    log(`paused since ${health.pausedAt} after ${health.consecutiveFailures} consecutive failures — clear data/campaign/health.json to resume`);
+    return;
+  }
+
+  const fail = (why) => {
+    health.consecutiveFailures = (health.consecutiveFailures ?? 0) + 1;
+    health.lastFailureAt = stamp();
+    health.lastFailure = why.slice(0, 160);
+    if (health.consecutiveFailures >= FAILURE_LIMIT) {
+      health.pausedAt = stamp();
+      log(`PAUSING campaign: ${health.consecutiveFailures} consecutive failures`);
+    }
+    writeHealth(health);
+  };
+  const succeed = () => {
+    writeHealth({ consecutiveFailures: 0, lastSuccessAt: stamp(), pausedAt: null });
+  };
+
   try {
     await call("telegram_connect_all_accounts");
     // به حسابِ مشخص سوئیچ کن، نه «هرچه فعال است». یک اجرای دیگر ممکن است حسابِ
@@ -93,6 +128,7 @@ async function main() {
     }
     const plan = JSON.parse(preview.text);
     if (!plan.group) {
+      // «چیزی موعدش نرسیده» شکست نیست؛ همان کاری است که زمان‌بندی باید بکند.
       log(`nothing due — ${plan.reason ?? "every group is inside its cooldown"}`);
       return;
     }
@@ -101,6 +137,7 @@ async function main() {
     if (!result.err) {
       const posted = JSON.parse(result.text);
       log(`posted ${posted.group} ${posted.variant}${posted.withImage ? " +image" : ""} msg=${posted.messageId}`);
+      succeed();
       return;
     }
 
@@ -109,12 +146,12 @@ async function main() {
     if (/ALLOW_PAYMENT_REQUIRED|CHAT_SEND_PLAIN_FORBIDDEN/.test(message)) {
       const off = disableGroup(plan.group.replace(/^@/, ""), "charges to post: " + message.slice(0, 70));
       log(`${plan.group}: paid posting${off ? " — disabled in roster" : ""}`);
-      return;
+      return;   // یک گروه که پول می‌خواهد، خرابیِ کمپین نیست
     }
     if (/CHAT_WRITE_FORBIDDEN|USER_BANNED_IN_CHANNEL|CHANNEL_PRIVATE/.test(message)) {
       const off = disableGroup(plan.group.replace(/^@/, ""), message.slice(0, 90));
       log(`${plan.group}: cannot post${off ? " — disabled in roster" : ""} (${message.slice(0, 90)})`);
-      return;
+      return;   // گروه غیرفعال شد؛ این هم خرابیِ کمپین نیست
     }
     // slowmode یعنی «الان نه»، نه «هرگز». گروه سالم است؛ نوبتِ بعدی می‌گیردش.
     if (/SLOWMODE_WAIT/.test(message)) {
@@ -123,10 +160,12 @@ async function main() {
     }
     if (/PEER_FLOOD|FLOOD_WAIT/.test(message)) {
       log(`rate limited, stopping this tick: ${message.slice(0, 110)}`);
+      fail(message);
       process.exitCode = 1;
       return;
     }
     log(`failed ${plan.group}: ${message.slice(0, 140)}`);
+    fail(message);
     process.exitCode = 1;
   } finally {
     await client.close().catch(() => {});
