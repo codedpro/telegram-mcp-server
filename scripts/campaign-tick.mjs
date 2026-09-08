@@ -82,6 +82,9 @@ async function main() {
 
   try {
     await call("telegram_connect_all_accounts");
+    // به حسابِ مشخص سوئیچ کن، نه «هرچه فعال است». یک اجرای دیگر ممکن است حسابِ
+    // فعال را عوض کرده باشد، و پوشه‌ها و عضویت‌ها متعلق به یک حسابِ خاص‌اند.
+    await call("telegram_switch_account", { name: "default" });
 
     const preview = await call("telegram_campaign_post_next", { dryRun: true });
     if (preview.err) {
