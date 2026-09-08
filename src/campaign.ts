@@ -14,10 +14,19 @@ import { join } from "node:path";
  * Everything is on disk so a restarted process cannot forget what it already
  * posted, which is the same reason the rate gate persists.
  */
-export const campaignDir = () =>
+/**
+ * Campaigns are separate by directory, because they are separate products.
+ * The website offer and the 1xAi offer want different copy, different rooms and
+ * their own memory of what has been posted where — sharing a ledger between
+ * them would mean one campaign's history silencing the other's rotation.
+ */
+export const campaignRoot = () =>
   process.env.TELEGRAM_CAMPAIGN_DIR ?? join(process.cwd(), "data", "campaign");
 
-const file = (name: string) => join(campaignDir(), name);
+export const campaignDir = (campaign = process.env.TELEGRAM_CAMPAIGN ?? "web") =>
+  join(campaignRoot(), campaign);
+
+const file = (name: string, campaign?: string) => join(campaignDir(campaign), name);
 
 export interface Group {
   username: string;
@@ -85,31 +94,31 @@ export interface Ledger {
   posts: PostRecord[];
 }
 
-function readJson<T>(name: string, fallback: T): T {
+function readJson<T>(name: string, fallback: T, campaign?: string): T {
   try {
-    return JSON.parse(readFileSync(file(name), "utf8")) as T;
+    return JSON.parse(readFileSync(file(name, campaign), "utf8")) as T;
   } catch {
     return fallback;
   }
 }
 
-function writeJson(name: string, value: unknown): string {
-  mkdirSync(campaignDir(), { recursive: true });
-  const path = file(name);
+function writeJson(name: string, value: unknown, campaign?: string): string {
+  mkdirSync(campaignDir(campaign), { recursive: true });
+  const path = file(name, campaign);
   writeFileSync(path, JSON.stringify(value, null, 2));
   return path;
 }
 
-export const loadGroups = () => readJson<{ groups: Group[] }>("roster.json", { groups: [] }).groups;
-export const saveGroups = (groups: Group[]) => writeJson("roster.json", { groups });
-export const loadCopy = () =>
+export const loadGroups = (campaign?: string) => readJson<{ groups: Group[] }>("roster.json", { groups: [] }, campaign).groups;
+export const saveGroups = (groups: Group[], campaign?: string) => writeJson("roster.json", { groups }, campaign);
+export const loadCopy = (campaign?: string) =>
   readJson<{ offer: Offer; variants: Variant[] }>("copy.json", {
     offer: { regions: {}, contact: "", examples: [], includes: [], guarantees: [] },
     variants: [],
-  });
-export const saveCopy = (copy: { offer: Offer; variants: Variant[] }) => writeJson("copy.json", copy);
-export const loadLedger = () => readJson<Ledger>("ledger.json", { posts: [] });
-export const saveLedger = (ledger: Ledger) => writeJson("ledger.json", ledger);
+  }, campaign);
+export const saveCopy = (copy: { offer: Offer; variants: Variant[] }, campaign?: string) => writeJson("copy.json", copy, campaign);
+export const loadLedger = (campaign?: string) => readJson<Ledger>("ledger.json", { posts: [] }, campaign);
+export const saveLedger = (ledger: Ledger, campaign?: string) => writeJson("ledger.json", ledger, campaign);
 
 /**
  * Fills the offer into a variant for one region.
@@ -251,9 +260,9 @@ export function planAhead(
   return plans;
 }
 
-export function recordPost(ledger: Ledger, record: PostRecord): Ledger {
+export function recordPost(ledger: Ledger, record: PostRecord, campaign?: string): Ledger {
   ledger.posts.push(record);
-  saveLedger(ledger);
+  saveLedger(ledger, campaign);
   return ledger;
 }
 

@@ -28,8 +28,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const rosterPath = join(root, "data", "campaign", "roster.json");
-const healthPath = join(root, "data", "campaign", "health.json");
+/** Which campaign this tick drives. Each has its own rooms, copy and ledger. */
+const CAMPAIGN = process.argv[2] ?? process.env.TELEGRAM_CAMPAIGN ?? "web";
+const rosterPath = join(root, "data", "campaign", CAMPAIGN, "roster.json");
+const healthPath = join(root, "data", "campaign", CAMPAIGN, "health.json");
 
 /** Stop after this many consecutive failed posts — a full day of hourly ticks. */
 const FAILURE_LIMIT = 24;
@@ -50,10 +52,7 @@ const writeHealth = (h) => writeFileSync(healthPath, JSON.stringify(h, null, 2))
  */
 const stamp = () =>
   new Date().toLocaleString("sv-SE", { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
-const log = (msg) => {
-  const line = `${stamp()}  ${msg}`;
-  console.log(line);
-};
+const log = (msg) => console.log(`${stamp()}  [${CAMPAIGN}] ${msg}`);
 
 /** A group we are forbidden from posting in will never become postable by retrying. */
 function disableGroup(username, reason) {
@@ -71,7 +70,7 @@ function disableGroup(username, reason) {
 }
 
 async function main() {
-  mkdirSync(join(root, "data", "campaign"), { recursive: true });
+  mkdirSync(join(root, "data", "campaign", CAMPAIGN), { recursive: true });
 
   const client = new Client({ name: "campaign-tick", version: "1" });
   // cwd صراحتاً ست می‌شود: سرور مسیرهای data/ را از working directory می‌سازد،
@@ -121,7 +120,7 @@ async function main() {
     // فعال را عوض کرده باشد، و پوشه‌ها و عضویت‌ها متعلق به یک حسابِ خاص‌اند.
     await call("telegram_switch_account", { name: "default" });
 
-    const preview = await call("telegram_campaign_post_next", { dryRun: true });
+    const preview = await call("telegram_campaign_post_next", { dryRun: true, campaign: CAMPAIGN });
     if (preview.err) {
       log(`skip: ${preview.text.replace(/\s+/g, " ").slice(0, 140)}`);
       return;
@@ -133,7 +132,7 @@ async function main() {
       return;
     }
 
-    const result = await call("telegram_campaign_post_next");
+    const result = await call("telegram_campaign_post_next", { campaign: CAMPAIGN });
     if (!result.err) {
       const posted = JSON.parse(result.text);
       log(`posted ${posted.group} ${posted.variant}${posted.withImage ? " +image" : ""} msg=${posted.messageId}`);

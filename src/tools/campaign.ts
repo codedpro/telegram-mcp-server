@@ -19,12 +19,12 @@ export function register(server: McpServer): void {
       title: "Campaign status",
       description:
         "Shows the advertising roster, which groups are due for a post, when each last saw an ad, and how much of the copy library each has already seen.",
-      inputSchema: {},
+      inputSchema: { campaign: z.string().default("web") },
     },
-    async () => {
-      const groups = loadGroups();
-      const copy = loadCopy();
-      const ledger = loadLedger();
+    async ({ campaign }) => {
+      const groups = loadGroups(campaign as string);
+      const copy = loadCopy(campaign as string);
+      const ledger = loadLedger(campaign as string);
       const ok = ledger.posts.filter((p) => !p.error);
       return {
         offer: copy.offer,
@@ -65,11 +65,12 @@ export function register(server: McpServer): void {
       inputSchema: {
         count: z.number().int().min(1).max(60).default(12),
         showText: z.boolean().default(false),
+        campaign: z.string().default("web"),
       },
     },
-    async ({ count, showText }) => {
-      const copy = loadCopy();
-      const plans = planAhead(loadGroups(), copy, loadLedger(), count as number);
+    async ({ count, showText, campaign }) => {
+      const copy = loadCopy(campaign as string);
+      const plans = planAhead(loadGroups(campaign as string), copy, loadLedger(campaign as string), count as number);
       return {
         planned: plans.length,
         posts: plans.map((p, i) => ({
@@ -96,12 +97,13 @@ export function register(server: McpServer): void {
         dryRun: z.boolean().default(false),
         group: z.string().optional().describe("Force a specific group instead of the scheduler's pick"),
         force: z.boolean().default(false).describe("Ignore the per-group cooldown. The rate gate still applies. Manual use only — the cooldown is what stops a group being spammed."),
+        campaign: z.string().default("web"),
       },
     },
-    async ({ dryRun, group, force }) => {
-      const groups = loadGroups();
-      const copy = loadCopy();
-      const ledger = loadLedger();
+    async ({ dryRun, group, force, campaign }) => {
+      const groups = loadGroups(campaign as string);
+      const copy = loadCopy(campaign as string);
+      const ledger = loadLedger(campaign as string);
 
       const plan = group
         ? (() => {
@@ -151,7 +153,7 @@ export function register(server: McpServer): void {
           account: plan.group.account,
           at: new Date().toISOString(),
           messageId: sent.id,
-        });
+        }, campaign as string);
         return {
           posted: true,
           group: "@" + plan.group.username,
@@ -169,7 +171,7 @@ export function register(server: McpServer): void {
           account: plan.group.account,
           at: new Date().toISOString(),
           error: message.slice(0, 200),
-        });
+        }, campaign as string);
         throw err;
       }
     },
@@ -186,11 +188,12 @@ export function register(server: McpServer): void {
         minPosts: z.number().int().min(1).max(20).default(2).describe("Only judge a group once it has this many posts to judge on"),
         disableAtRate: z.number().min(0).max(1).default(1).describe("Disable a group whose deleted share is at least this. 1 means only groups deleting everything."),
         apply: z.boolean().default(false).describe("Actually disable; otherwise report only"),
+        campaign: z.string().default("web"),
       },
     },
-    async ({ minPosts, disableAtRate, apply }) => {
-      const groups = loadGroups();
-      const ledger = loadLedger();
+    async ({ minPosts, disableAtRate, apply, campaign }) => {
+      const groups = loadGroups(campaign as string);
+      const ledger = loadLedger(campaign as string);
       const posts = ledger.posts.filter((p) => !p.error && p.messageId);
 
       const byGroup = new Map<string, { alive: number; deleted: number }>();
@@ -226,7 +229,7 @@ export function register(server: McpServer): void {
           g.note = `AUTO-DISABLED: deleted ${row.deleted}/${row.posts} ads`;
           disabled.push(row.group);
         }
-        if (disabled.length) saveGroups(groups);
+        if (disabled.length) saveGroups(groups, campaign as string);
       }
       return { checked: posts.length, groups: report, disabled, applied: Boolean(apply) };
     },
@@ -243,14 +246,15 @@ export function register(server: McpServer): void {
         toAccount: z.string().min(1),
         groups: z.array(z.string()).optional().describe("Group usernames; omit to move every group assigned to fromAccount"),
         fromAccount: z.string().optional(),
+        campaign: z.string().default("web"),
       },
     },
-    async ({ toAccount, groups: names, fromAccount }) => {
+    async ({ toAccount, groups: names, fromAccount, campaign }) => {
       const known = listAccounts().map((a) => a.name);
       if (!known.includes(toAccount as string)) {
         throw new Error(`No saved account "${toAccount}". Saved: ${known.join(", ") || "none"}.`);
       }
-      const roster = loadGroups();
+      const roster = loadGroups(campaign as string);
       const want = names ? new Set((names as string[]).map((n) => n.replace(/^@/, ""))) : null;
       const moved: string[] = [];
       for (const g of roster) {
@@ -260,7 +264,7 @@ export function register(server: McpServer): void {
         g.account = toAccount as string;
         moved.push("@" + g.username);
       }
-      saveGroups(roster);
+      saveGroups(roster, campaign as string);
       return { movedTo: toAccount, moved, count: moved.length };
     },
   );

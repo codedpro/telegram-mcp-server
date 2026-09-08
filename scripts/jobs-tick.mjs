@@ -105,7 +105,10 @@ async function main() {
       }
       if (!score) continue;
       const handles = [...new Set(item.text.match(/@[A-Za-z0-9_]{4,}/g) ?? [])].filter((h) => !CHANNELS.test(h));
-      ranked.push({ ...item, score, tags, contact: handles[0] ?? null });
+      // بدون راه تماس مستقیم، این آگهی به درد نمی‌خورد: نقطه‌ی کلِ سیستم رسیدن به
+      // خودِ آدم است، نه فرستادن او به یک فرم در آپ‌ورک یا لینکدین.
+      if (!handles.length) continue;
+      ranked.push({ ...item, score, tags, contact: handles[0] });
     }
     ranked.sort((a, b) => b.score - a.score);
 
