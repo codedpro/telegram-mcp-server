@@ -24,6 +24,8 @@ export interface Group {
   title: string;
   /** Which price list this group sees. Quoting pounds to Istanbul reads as careless. */
   region: string;
+  /** Which language set this group sees. A Persian ad in an English room is ignored. */
+  lang?: string;
   members: number;
   /** Telegram's own floor between messages in this group. */
   slowmodeSeconds: number;
@@ -38,6 +40,8 @@ export interface Group {
 export interface Variant {
   id: string;
   angle: string;
+  /** Defaults to "fa" so existing copy needs no migration. */
+  lang?: string;
   text: string;
   /** Local image path, attached when present. */
   image?: string | null;
@@ -50,8 +54,17 @@ export interface Region {
   currencyNote?: string;
 }
 
+/** English wording for the same offer. Falls back to the Persian fields. */
+export interface OfferLocale {
+  contact?: string;
+  examples?: string[];
+  includes?: string[];
+  guarantees?: string[];
+}
+
 export interface Offer {
   regions: Record<string, Region>;
+  en?: OfferLocale;
   contact: string;
   /** Real, reachable sites. Proof belongs in the ad, not behind a DM. */
   examples: string[];
@@ -105,16 +118,21 @@ export const saveLedger = (ledger: Ledger) => writeJson("ledger.json", ledger);
  * into two Istanbul groups, which tells the reader immediately that the ad was
  * not written for them.
  */
-export function render(text: string, offer: Offer, region: string): string {
+export function render(text: string, offer: Offer, region: string, lang = "fa"): string {
   const prices = offer.regions[region] ?? Object.values(offer.regions)[0];
   if (!prices) throw new Error(`No price list for region "${region}".`);
+  const loc = lang === "en" && offer.en ? offer.en : {};
+  const contact = loc.contact ?? offer.contact;
+  const examples = loc.examples ?? offer.examples;
+  const includes = loc.includes ?? offer.includes;
+  const guarantees = loc.guarantees ?? offer.guarantees;
   return text
     .replaceAll("{{monthly}}", prices.monthly)
     .replaceAll("{{setup}}", prices.setup)
-    .replaceAll("{{contact}}", offer.contact)
-    .replaceAll("{{examples}}", offer.examples.join("\n"))
-    .replaceAll("{{includes}}", offer.includes.map((i) => `• ${i}`).join("\n"))
-    .replaceAll("{{guarantees}}", offer.guarantees.map((g) => `✅ ${g}`).join("\n"));
+    .replaceAll("{{contact}}", contact)
+    .replaceAll("{{examples}}", examples.join("\n"))
+    .replaceAll("{{includes}}", includes.map((i) => `• ${i}`).join("\n"))
+    .replaceAll("{{guarantees}}", guarantees.map((g) => `✅ ${g}`).join("\n"));
 }
 
 const successful = (ledger: Ledger) => ledger.posts.filter((p) => !p.error);
@@ -162,7 +180,10 @@ export function planNext(
   const { g, days } = due[0]!;
 
   const usedHere = successful(ledger).filter((p) => p.group === g.username);
-  const unseen = copy.variants.filter((v) => !usedHere.some((p) => p.variant === v.id));
+  const lang = g.lang ?? "fa";
+  const speakable = copy.variants.filter((v) => (v.lang ?? "fa") === lang);
+  if (!speakable.length) return null;
+  const unseen = speakable.filter((v) => !usedHere.some((p) => p.variant === v.id));
   let variant: Variant;
   let reason: string;
   if (unseen.length) {
@@ -177,7 +198,7 @@ export function planNext(
     }
     const angleLastUsed = new Map<string, string>();
     for (const p of successful(ledger)) {
-      const v = copy.variants.find((x) => x.id === p.variant);
+      const v = speakable.find((x) => x.id === p.variant);
       if (!v) continue;
       const prev = angleLastUsed.get(v.angle);
       if (!prev || p.at > prev) angleLastUsed.set(v.angle, p.at);
@@ -196,9 +217,12 @@ export function planNext(
     reason = seenBefore
       ? `new to this group; least recently used campaign-wide`
       : `new to this group and unused campaign-wide`;
+    reason += ` (${lang})`;
   } else {
-    const oldest = [...usedHere].sort((a, b) => a.at.localeCompare(b.at))[0]!;
-    variant = copy.variants.find((v) => v.id === oldest.variant) ?? copy.variants[0]!;
+    const oldest = [...usedHere]
+      .filter((p) => speakable.some((v) => v.id === p.variant))
+      .sort((a, b) => a.at.localeCompare(b.at))[0];
+    variant = (oldest && speakable.find((v) => v.id === oldest.variant)) ?? speakable[0]!;
     reason = `all copy used here; reusing the least recent (${Math.round(daysSince(oldest.at))}d ago)`;
   }
   return { group: g, variant, daysSinceLastPost: days, reason };

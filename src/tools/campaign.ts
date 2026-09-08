@@ -79,7 +79,7 @@ export function register(server: McpServer): void {
           variant: p.variant.id,
           angle: p.variant.angle,
           reason: p.reason,
-          ...(showText ? { text: render(p.variant.text, copy.offer, p.group.region) } : {}),
+          ...(showText ? { text: render(p.variant.text, copy.offer, p.group.region, p.group.lang ?? "fa") } : {}),
         })),
       };
     },
@@ -115,7 +115,7 @@ export function register(server: McpServer): void {
       if (!plan) {
         return { posted: false, reason: "Nothing is due. Every enabled group is still inside its cooldown." };
       }
-      const text = render(plan.variant.text, copy.offer, plan.group.region);
+      const text = render(plan.variant.text, copy.offer, plan.group.region, plan.group.lang ?? "fa");
       if (dryRun) {
         return { posted: false, dryRun: true, group: "@" + plan.group.username, variant: plan.variant.id, reason: plan.reason, text };
       }
