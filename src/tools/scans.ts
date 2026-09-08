@@ -83,6 +83,34 @@ export function register(server: McpServer): void {
 
   tool(
     server,
+    "delete_folder",
+    {
+      title: "Delete a folder",
+      description:
+        "Removes a folder (tab). The chats stay in your chat list and in any other folder — only the tab goes. Shared folders (chatlist type) are removed from your account too. Requires confirm: true.",
+      inputSchema: { folder: z.string().min(1), confirm: z.boolean().optional() },
+      destructive: true,
+    },
+    async ({ folder, confirm }) => {
+      requireConfirm(confirm as boolean | undefined, `Deleting the folder "${folder}"`);
+      const client = await getAuthorizedClient();
+      const res = await client.invoke(new Api.messages.GetDialogFilters());
+      const title = (f: Api.TypeDialogFilter) => {
+        const t = (f as { title?: { text?: string } | string }).title;
+        return typeof t === "string" ? t : (t?.text ?? "");
+      };
+      const target = res.filters.find((f) => title(f).toLowerCase() === String(folder).trim().toLowerCase());
+      if (!target) throw new Error(`No folder named "${folder}".`);
+      const id = (target as unknown as { id?: number }).id;
+      if (typeof id !== "number") throw new Error(`"${folder}" is the default list and cannot be deleted.`);
+      // آپدیت بدون filter یعنی حذف — همان راهی که خودِ تلگرام پوشه را برمی‌دارد.
+      await client.invoke(new Api.messages.UpdateDialogFilter({ id }));
+      return { deleted: title(target), id, kind: target.className };
+    },
+  );
+
+  tool(
+    server,
     "add_to_folder",
     {
       title: "Add chats to a folder",
