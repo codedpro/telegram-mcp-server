@@ -31,7 +31,7 @@ export function register(server: McpServer): void {
       inputSchema: {
         status: z.enum(["new", "contacted", "replied", "blacklisted", "all"]).default("new"),
         tier: z.enum(["priority", "standard", "low", "all"]).default("all")
-          .describe("priority = active in 1-2 groups with a real posting history, the ones worth an unattended cron working through. standard/low are lower-confidence, not junk. Defaults to all so a status filter (e.g. blacklisted) is never silently narrowed by tier too — pass tier explicitly when you want the filtered queue."),
+          .describe("low means already visible to everyone doing this kind of outreach (3+ groups), not 'weak'. This is a reading aid, not a quality filter — a rarely-posting lead can easily be a better target than a heavy poster. Read the sample text and decide per lead; do not treat this as a score to automate over."),
         businessKey: z.string().optional().describe(`One of: ${BUSINESS_TYPES.map((t) => t.key).join(", ")}`),
         limit: z.number().int().min(1).max(200).default(30),
       },
@@ -49,6 +49,7 @@ export function register(server: McpServer): void {
         leads: leads.slice(0, limit as number).map((e) => ({
           senderId: e.senderId, username: e.username ? "@" + e.username : null, name: e.name,
           businessType: e.businessType, tier: tierOf(e), posts: e.posts, groups: e.chats, status: e.status,
+          sample: e.sample,
         })),
       };
     },

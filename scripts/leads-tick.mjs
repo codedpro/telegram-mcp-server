@@ -1,22 +1,23 @@
 #!/usr/bin/env node
 /**
- * One tick of business-owner outreach, for cron.
+ * Send outreach to the next unreviewed lead in the CRM. NOT on a cron.
  *
- * This never had a cron. campaign-tick.mjs and jobs-tick.mjs did, but direct
- * outreach to leads only ever ran as a hand-typed script in a scratchpad —
- * which is exactly why it silently stopped for a week and the state (who was
- * contacted) evaporated with the session that wrote it. src/leads.ts is the
- * fix for the second half; this script is the fix for the first half.
+ * It was, briefly, and that was the wrong call: it sent to whoever a formula
+ * ranked highest, and the formula turned out to be wrong in a way only a
+ * person reading the actual post would catch — a business that advertised
+ * once is not automatically a worse lead than one that posts daily, it may
+ * just not be drowning in cold pitches the way a heavy poster is. Deciding
+ * who is worth a message is a judgment call per lead, not a score to
+ * automate over, so this is now something a person (or an agent reading the
+ * leads first with telegram_leads_list) runs on purpose, lead by lead.
  *
- * Deliberately slow. A DM to a stranger is a much heavier spam signal than a
- * group post, and this account has already been PEER_FLOOD-locked once from
- * outreach running too fast. One lead per tick, ticks hours apart.
+ * The one thing worth keeping from the cron version: it still self-locks on
+ * PEER_FLOOD rather than being retried into a wall, and it still routes
+ * through leads_send so the CRM and the rate gate stay authoritative.
  *
- * Self-pausing like the campaign ticks: a PEER_FLOOD writes a lock file and
- * every tick after that is a no-op until it is cleared by hand, rather than
- * hammering a locked account every few hours for a week.
- *
- * cron: every 3 hours, at minute 17 -- /usr/bin/node scripts/leads-tick.mjs >> data/leads/tick.log 2>&1
+ * usage:  node scripts/leads-tick.mjs [account]   (reads and sends the next
+ *         tier=priority lead; prefer picking a specific username by hand
+ *         via telegram_leads_send once you have actually read their post)
  */
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

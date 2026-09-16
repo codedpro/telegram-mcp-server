@@ -25,8 +25,15 @@ export interface BusinessType {
   value: number;
 }
 
-/** Ordered so the first regex to match wins — put more specific trades first. */
+/**
+ * Ordered so the first regex to match wins — put more specific trades first.
+ * Exchange goes first, unconditionally: "صراف" is unambiguous, but exchanges
+ * routinely use generic words like "عمده" (wholesale) in their own marketing
+ * ("همکاران و خریداران عمده"), which matched retail before this reordering
+ * and let real exchanges dodge the blacklist under a different label.
+ */
 export const BUSINESS_TYPES: (BusinessType & { re: RegExp })[] = [
+  { key: "exchange", fa: "صرافی و انتقال ارز", value: 4, re: /صراف|نرخ ?(ارز|امروز)|حواله|ترانسفر|تبدیل ?ارز|تبادل ?ارز|خرید ?(پوند|دلار|یورو)|فروش ?(پوند|دلار|یورو)|exchange rate|money ?transfer|remittance/i },
   { key: "clinic", fa: "درمان و کلینیک", value: 5, re: /دندان|ایمپلنت|کلینیک|پزشک|دکتر |مطب|فیزیوتراپ|روانشناس|dental|clinic|therapist|doctor/i },
   { key: "legal", fa: "مهاجرت و امور حقوقی", value: 5, re: /مهاجرت|ویزا|اقامت|وکیل|امور ?اداری|ترجمه ?رسمی|شهروندی|immigration|visa|solicitor|lawyer/i },
   { key: "education", fa: "آموزش و تدریس", value: 4, re: /تدریس|آموزش|کلاس|دوره|زبان ?انگلیسی|مدرس|آیلتس|tutor|teaching|course|ielts/i },
@@ -37,9 +44,6 @@ export const BUSINESS_TYPES: (BusinessType & { re: RegExp })[] = [
   { key: "transport", fa: "حمل‌ونقل و باربری", value: 3, re: /باربری|حمل ?و ?نقل|بار ?هوایی|کارگو|ارسال ?بار|ترخیص|cargo|shipping|freight|courier/i },
   { key: "retail", fa: "فروشگاه و واردات", value: 3, re: /سوپر ?مارکت|فروشگاه|پخش ?محصولات|واردات|عمده|خواروبار|بقالی|grocery|import|wholesale|shop/i },
   { key: "crypto", fa: "ارز دیجیتال", value: 2, re: /ارز ?دیجیتال|تتر|بیت ?کوین|کریپتو|crypto|bitcoin|usdt/i },
-  // صرافی آخر است تا صرافی‌ای که هم آموزش یا ملک تبلیغ می‌کند، به آن دسته‌ی
-  // ارزشمندتر برود، نه به صرافی.
-  { key: "exchange", fa: "صرافی و انتقال ارز", value: 4, re: /صراف|نرخ ?(ارز|امروز)|حواله|ترانسفر|تبدیل ?ارز|تبادل ?ارز|خرید ?(پوند|دلار|یورو)|فروش ?(پوند|دلار|یورو)|exchange rate|money ?transfer|remittance/i },
 ];
 
 export function classify(text: string): BusinessType | null {
@@ -186,40 +190,39 @@ const VALUE = Object.fromEntries(BUSINESS_TYPES.map((t) => [t.key, t.value]));
 export type LeadTier = "priority" | "standard" | "low";
 
 /**
- * Whether a lead looks like it will actually answer a cold message, learned
- * from the one comparison we have data for: every currency exchange we
- * contacted cross-posted into 3+ groups with 50-120 posts and ignored us,
+ * A flag, not a filter: whether a lead is likely already saturated with cold
+ * pitches, from the one comparison we have data for. Every currency exchange
+ * we contacted cross-posted into 3+ groups with 50-120 posts and ignored us,
  * while everyone who replied — a dentist, two immigration consultants, a
- * tutor — posted in only 1-2 groups with a much more modest history.
+ * tutor — posted in only 1-2 groups.
  *
- * The read: heavy multi-group cross-posting is what a business does once its
- * marketing is already a running system, at which point a cold pitch about
- * getting found online has nothing to offer them. A single-group poster with
- * some history is a real, moderately active business that has not yet built
- * that system — which is exactly who benefits from one.
- *
- * "low" is not "bad", it is "low confidence" — nothing here is blacklisted on
- * a hunch. It just does not go in the queue a cron works through unattended.
+ * That is the only thing this predicts: heavy multi-group cross-posting means
+ * a business is visible enough that everyone doing this kind of outreach has
+ * already found them, so one more cold message is nothing new. It says
+ * nothing about a single-post advertiser being a worse lead — a business that
+ * posted once could easily be a better one precisely because nobody has
+ * pitched them yet. Post count was dropped from this after review: treating
+ * "posted rarely" as a mark against someone was backwards, and no formula
+ * should be deciding that anyway. This flag informs a human reading the
+ * actual post; it does not rank or gate anyone automatically.
  */
 export function tierOf(e: CrmEntry): LeadTier {
-  if (e.chats.length >= 3) return "low"; // cross-posts everywhere — already has a system, tunes us out
-  if (e.posts < 5) return "low"; // one or two posts ever — likely a one-off, not a running business
-  if (!e.businessKey) return "standard"; // active and focused, but we don't know what to pitch them
+  if (e.chats.length >= 3) return "low"; // visible everywhere — likely already fielding outreach like this
+  if (!e.businessKey) return "standard"; // active, but we don't know what trade to even describe
   return "priority";
 }
 
-/** Best-first queue within a tier: value of the trade, how active they are. */
+/**
+ * Lists leads for a person to read, not to auto-send to. Sorted only by trade
+ * value as a reading aid — the actual decision to contact someone is made by
+ * reading their post, not by this score.
+ */
 export function rankLeads(crm: Crm, opts: { status?: LeadStatus; tiers?: LeadTier[] } = {}): CrmEntry[] {
-  const tierRank: Record<LeadTier, number> = { priority: 0, standard: 1, low: 2 };
   return Object.values(crm.entries)
     .filter((e) => e.username && (opts.status ? e.status === opts.status : e.status !== "blacklisted"))
     .filter((e) => !opts.tiers || opts.tiers.includes(tierOf(e)))
-    .map((e) => ({
-      e,
-      tier: tierOf(e),
-      score: (VALUE[e.businessKey ?? ""] ?? 1) * 3 + Math.min(e.posts, 60) / 4,
-    }))
-    .sort((a, b) => tierRank[a.tier] - tierRank[b.tier] || b.score - a.score)
+    .map((e) => ({ e, score: VALUE[e.businessKey ?? ""] ?? 1 }))
+    .sort((a, b) => b.score - a.score)
     .map((x) => x.e);
 }
 
