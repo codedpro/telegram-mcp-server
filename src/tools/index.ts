@@ -5,6 +5,7 @@ import * as accounts from "./accounts.js";
 import * as auth from "./auth.js";
 import * as campaign from "./campaign.js";
 import * as chats from "./chats.js";
+import * as leads from "./leads.js";
 import * as contacts from "./contacts.js";
 import * as media from "./media.js";
 import * as messages from "./messages.js";
@@ -12,7 +13,7 @@ import * as raw from "./raw.js";
 import * as scans from "./scans.js";
 
 export function registerTools(server: McpServer): void {
-  for (const group of [auth, account, accounts, advertisers, campaign, chats, messages, media, contacts, scans, raw]) {
+  for (const group of [auth, account, accounts, advertisers, campaign, chats, leads, messages, media, contacts, scans, raw]) {
     group.register(server);
   }
 }

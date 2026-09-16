@@ -147,7 +147,12 @@ async function main() {
       log(`${plan.group}: paid posting${off ? " — disabled in roster" : ""}`);
       return;   // یک گروه که پول می‌خواهد، خرابیِ کمپین نیست
     }
-    if (/CHAT_WRITE_FORBIDDEN|USER_BANNED_IN_CHANNEL|CHANNEL_PRIVATE/.test(message)) {
+    // CHAT_GUEST_SEND_FORBIDDEN: this "group" is actually a channel's linked
+    // discussion group — posting needs joining that specific discussion thread,
+    // which telegram_join_chat does not do. Retrying never fixes it, and left
+    // unhandled this one error burned all 24 strikes on a single group and
+    // paused the whole campaign for a week while the other groups sat idle.
+    if (/CHAT_WRITE_FORBIDDEN|USER_BANNED_IN_CHANNEL|CHANNEL_PRIVATE|CHAT_GUEST_SEND_FORBIDDEN/.test(message)) {
       const off = disableGroup(plan.group.replace(/^@/, ""), message.slice(0, 90));
       log(`${plan.group}: cannot post${off ? " — disabled in roster" : ""} (${message.slice(0, 90)})`);
       return;   // گروه غیرفعال شد؛ این هم خرابیِ کمپین نیست
@@ -167,7 +172,11 @@ async function main() {
     fail(message);
     process.exitCode = 1;
   } finally {
-    await client.close().catch(() => {});
+    // close() can hang on the child; don't let it hold the tick open.
+    await Promise.race([
+      client.close().catch(() => {}),
+      new Promise((r) => setTimeout(r, 5_000).unref()),
+    ]);
   }
 }
 
@@ -180,4 +189,10 @@ main().catch((err) => {
     // logging must never be the reason a tick fails
   }
   process.exitCode = 1;
+}).finally(() => {
+  // Exit explicitly. The Telegram client inside the server keeps sockets and
+  // timers alive, so after "paused" or "nothing due" the tick never exited on
+  // its own — every run left a node pair behind, ~1,150 of them over four days,
+  // until the machine ran out of memory (2026-09-16).
+  process.exit();
 });
