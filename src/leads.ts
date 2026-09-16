@@ -175,12 +175,43 @@ export function syncFromRawLeads(): { scanned: number; added: number; updated: n
 
 const VALUE = Object.fromEntries(BUSINESS_TYPES.map((t) => [t.key, t.value]));
 
-/** Best-first queue: value of the trade, how active they are, how many rooms they're in. */
-export function rankLeads(crm: Crm, opts: { status?: LeadStatus } = {}): CrmEntry[] {
+export type LeadTier = "priority" | "standard" | "low";
+
+/**
+ * Whether a lead looks like it will actually answer a cold message, learned
+ * from the one comparison we have data for: every currency exchange we
+ * contacted cross-posted into 3+ groups with 50-120 posts and ignored us,
+ * while everyone who replied — a dentist, two immigration consultants, a
+ * tutor — posted in only 1-2 groups with a much more modest history.
+ *
+ * The read: heavy multi-group cross-posting is what a business does once its
+ * marketing is already a running system, at which point a cold pitch about
+ * getting found online has nothing to offer them. A single-group poster with
+ * some history is a real, moderately active business that has not yet built
+ * that system — which is exactly who benefits from one.
+ *
+ * "low" is not "bad", it is "low confidence" — nothing here is blacklisted on
+ * a hunch. It just does not go in the queue a cron works through unattended.
+ */
+export function tierOf(e: CrmEntry): LeadTier {
+  if (e.chats.length >= 3) return "low"; // cross-posts everywhere — already has a system, tunes us out
+  if (e.posts < 5) return "low"; // one or two posts ever — likely a one-off, not a running business
+  if (!e.businessKey) return "standard"; // active and focused, but we don't know what to pitch them
+  return "priority";
+}
+
+/** Best-first queue within a tier: value of the trade, how active they are. */
+export function rankLeads(crm: Crm, opts: { status?: LeadStatus; tiers?: LeadTier[] } = {}): CrmEntry[] {
+  const tierRank: Record<LeadTier, number> = { priority: 0, standard: 1, low: 2 };
   return Object.values(crm.entries)
     .filter((e) => e.username && (opts.status ? e.status === opts.status : e.status !== "blacklisted"))
-    .map((e) => ({ e, score: (VALUE[e.businessKey ?? ""] ?? 1) * 3 + Math.min(e.posts, 40) / 4 + e.chats.length * 2 }))
-    .sort((a, b) => b.score - a.score)
+    .filter((e) => !opts.tiers || opts.tiers.includes(tierOf(e)))
+    .map((e) => ({
+      e,
+      tier: tierOf(e),
+      score: (VALUE[e.businessKey ?? ""] ?? 1) * 3 + Math.min(e.posts, 60) / 4,
+    }))
+    .sort((a, b) => tierRank[a.tier] - tierRank[b.tier] || b.score - a.score)
     .map((x) => x.e);
 }
 

@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   BUSINESS_TYPES, blacklist, blacklistByKey, draftOutreach, findByUsername,
-  loadCrm, markContacted, rankLeads, saveCrm, syncFromRawLeads,
+  loadCrm, markContacted, rankLeads, saveCrm, syncFromRawLeads, tierOf,
+  type LeadTier,
 } from "../leads.js";
 import { gate } from "../throttle.js";
 import { getAuthorizedClient } from "../telegram.js";
@@ -29,20 +30,25 @@ export function register(server: McpServer): void {
       description: "Lists business-owner leads from the CRM, best fit first. Filter by status or trade.",
       inputSchema: {
         status: z.enum(["new", "contacted", "replied", "blacklisted", "all"]).default("new"),
+        tier: z.enum(["priority", "standard", "low", "all"]).default("priority")
+          .describe("priority = active in 1-2 groups with a real posting history, the ones worth an unattended cron working through. standard/low are lower-confidence, not junk."),
         businessKey: z.string().optional().describe(`One of: ${BUSINESS_TYPES.map((t) => t.key).join(", ")}`),
         limit: z.number().int().min(1).max(200).default(30),
       },
     },
-    async ({ status, businessKey, limit }) => {
+    async ({ status, tier, businessKey, limit }) => {
       const crm = loadCrm();
-      let leads = status === "all" ? Object.values(crm.entries) : rankLeads(crm, { status: status === "new" ? undefined : (status as never) });
-      if (status === "new") leads = rankLeads(crm).filter((e) => e.status === "new");
+      const tiers = tier === "all" ? undefined : [tier as LeadTier];
+      let leads = status === "all"
+        ? Object.values(crm.entries).filter((e) => !tiers || tiers.includes(tierOf(e)))
+        : rankLeads(crm, { status: status === "new" ? undefined : (status as never), tiers });
+      if (status === "new") leads = rankLeads(crm, { tiers }).filter((e) => e.status === "new");
       if (businessKey) leads = leads.filter((e) => e.businessKey === businessKey);
       return {
         total: leads.length,
         leads: leads.slice(0, limit as number).map((e) => ({
           senderId: e.senderId, username: e.username ? "@" + e.username : null, name: e.name,
-          businessType: e.businessType, posts: e.posts, groups: e.chats, status: e.status,
+          businessType: e.businessType, tier: tierOf(e), posts: e.posts, groups: e.chats, status: e.status,
         })),
       };
     },
