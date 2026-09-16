@@ -255,11 +255,16 @@ export function register(server: McpServer): void {
           saveBackoff(acct, onSuccess());
           return { attempted: true, sent: true, to: "@" + item.username, waitedMs: paced.waitedMs, messageId: sent.id, skipped: skipped.length ? skipped : undefined };
         } catch (err) {
-          const message = (err as Error).message;
-          if (/PEER_FLOOD|FLOOD_WAIT/.test(message)) {
-            const next = onFailure(backoff, message.slice(0, 160));
+          // teleproto's RPCError subclasses (e.g. PeerFloodError) put the raw
+          // Telegram error code in .errorMessage, not .message — .message is
+          // a human-readable sentence that never contains "PEER_FLOOD" at
+          // all. Checking both is what makes this match the real error.
+          const e = err as Error & { errorMessage?: string };
+          const combined = `${e.errorMessage ?? ""} ${e.message ?? ""}`;
+          if (/PEER_FLOOD|FLOOD_WAIT/.test(combined)) {
+            const next = onFailure(backoff, combined.trim().slice(0, 160));
             saveBackoff(acct, next);
-            return { attempted: true, sent: false, blocked: true, stage: next.stage, nextAttemptAt: next.nextAttemptAt, error: message.slice(0, 160), skipped: skipped.length ? skipped : undefined };
+            return { attempted: true, sent: false, blocked: true, stage: next.stage, nextAttemptAt: next.nextAttemptAt, error: combined.trim().slice(0, 160), skipped: skipped.length ? skipped : undefined };
           }
           item.status = "failed";
           saveQueue(q);
