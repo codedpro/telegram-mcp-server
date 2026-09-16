@@ -39,7 +39,7 @@ export const BUSINESS_TYPES: (BusinessType & { re: RegExp })[] = [
   { key: "crypto", fa: "ارز دیجیتال", value: 2, re: /ارز ?دیجیتال|تتر|بیت ?کوین|کریپتو|crypto|bitcoin|usdt/i },
   // صرافی آخر است تا صرافی‌ای که هم آموزش یا ملک تبلیغ می‌کند، به آن دسته‌ی
   // ارزشمندتر برود، نه به صرافی.
-  { key: "exchange", fa: "صرافی و انتقال ارز", value: 4, re: /صراف|نرخ ?(ارز|امروز)|حواله|ترانسفر|تبدیل ?ارز|exchange rate|money ?transfer|remittance/i },
+  { key: "exchange", fa: "صرافی و انتقال ارز", value: 4, re: /صراف|نرخ ?(ارز|امروز)|حواله|ترانسفر|تبدیل ?ارز|تبادل ?ارز|خرید ?(پوند|دلار|یورو)|فروش ?(پوند|دلار|یورو)|exchange rate|money ?transfer|remittance/i },
 ];
 
 export function classify(text: string): BusinessType | null {
@@ -157,6 +157,14 @@ export function syncFromRawLeads(): { scanned: number; added: number; updated: n
         existing.links = [...new Set([...existing.links, ...l.links])];
         existing.emails = [...new Set([...existing.emails, ...l.emails])];
         if (l.lastSeen > existing.lastSeen) { existing.lastSeen = l.lastSeen; existing.sample = l.sample; }
+        // Re-classify only while still untouched: a contacted/replied/blacklisted
+        // person's trade label should not shift under a decision already made
+        // about them, but a "new" entry should benefit when the classifier
+        // improves rather than being stuck with whatever it guessed on day one.
+        if (existing.status === "new" && type && type.key !== existing.businessKey) {
+          existing.businessKey = type.key;
+          existing.businessType = type.fa;
+        }
         updated += 1;
       } else {
         crm.entries[l.senderId] = {

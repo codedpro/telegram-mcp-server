@@ -30,8 +30,8 @@ export function register(server: McpServer): void {
       description: "Lists business-owner leads from the CRM, best fit first. Filter by status or trade.",
       inputSchema: {
         status: z.enum(["new", "contacted", "replied", "blacklisted", "all"]).default("new"),
-        tier: z.enum(["priority", "standard", "low", "all"]).default("priority")
-          .describe("priority = active in 1-2 groups with a real posting history, the ones worth an unattended cron working through. standard/low are lower-confidence, not junk."),
+        tier: z.enum(["priority", "standard", "low", "all"]).default("all")
+          .describe("priority = active in 1-2 groups with a real posting history, the ones worth an unattended cron working through. standard/low are lower-confidence, not junk. Defaults to all so a status filter (e.g. blacklisted) is never silently narrowed by tier too — pass tier explicitly when you want the filtered queue."),
         businessKey: z.string().optional().describe(`One of: ${BUSINESS_TYPES.map((t) => t.key).join(", ")}`),
         limit: z.number().int().min(1).max(200).default(30),
       },

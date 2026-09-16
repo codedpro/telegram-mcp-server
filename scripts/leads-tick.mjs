@@ -65,7 +65,7 @@ async function main() {
     await call("telegram_connect_all_accounts");
     await call("telegram_switch_account", { name: ACCOUNT });
 
-    const next = await call("telegram_leads_list", { status: "new", limit: 1 });
+    const next = await call("telegram_leads_list", { status: "new", tier: "priority", limit: 1 });
     if (next.err) { log(`list failed: ${next.text.slice(0, 140)}`); return; }
     const lead = JSON.parse(next.text).leads[0];
     if (!lead) { log("no new leads left in the CRM — run telegram_leads_sync after the next find_advertisers scan"); return; }
