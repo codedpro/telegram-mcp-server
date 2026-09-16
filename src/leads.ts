@@ -264,3 +264,12 @@ export function findByUsername(crm: Crm, username: string): CrmEntry | undefined
   const clean = username.replace(/^@/, "").toLowerCase();
   return Object.values(crm.entries).find((e) => e.username?.toLowerCase() === clean);
 }
+
+/**
+ * Whether the CRM's own bookkeeping says this person is off-limits for a
+ * fresh cold-outreach message — already messaged, already replied, or
+ * blacklisted. "new" is the only status that clears this.
+ */
+export function alreadyHasHistory(entry: CrmEntry | undefined): boolean {
+  return entry !== undefined && entry.status !== "new";
+}

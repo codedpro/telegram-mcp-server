@@ -1,7 +1,8 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { TelegramClient } from "teleproto";
 import {
-  BUSINESS_TYPES, blacklist, blacklistByKey, draftOutreach, findByUsername,
+  BUSINESS_TYPES, alreadyHasHistory, blacklist, blacklistByKey, draftOutreach, findByUsername,
   loadCrm, markContacted, rankLeads, saveCrm, syncFromRawLeads, tierOf,
   type LeadTier,
 } from "../leads.js";
@@ -12,6 +13,25 @@ import {
 import { gate } from "../throttle.js";
 import { getAuthorizedClient } from "../telegram.js";
 import { peer, tool } from "./util.js";
+
+/**
+ * The real backstop, checked right before every send: does this chat already
+ * have ANY messages in either direction? The CRM is our own bookkeeping and
+ * can be wrong or incomplete — the earliest outreach here (Arvin, Atefeh,
+ * homayouniex) happened before the CRM existed at all and had to be
+ * backfilled by hand afterward. Telegram's own message history cannot be
+ * incomplete the way a log file can, so it is the check that actually
+ * guarantees "never message someone twice" rather than just usually doing so.
+ */
+async function hasExistingHistory(client: TelegramClient, username: string): Promise<boolean> {
+  try {
+    const messages = await client.getMessages(peer("@" + username), { limit: 1 });
+    return messages.length > 0;
+  } catch {
+    // نبودِ دسترسی به تاریخچه نباید جلوِ ارسال را بگیرد؛ فقط یعنی نمی‌دانیم.
+    return false;
+  }
+}
 
 export function register(server: McpServer): void {
   tool(
@@ -105,10 +125,15 @@ export function register(server: McpServer): void {
       const crm = loadCrm();
       const lead = findByUsername(crm, username as string);
       if (!lead) throw new Error(`"${username}" is not in the lead CRM. Run telegram_leads_sync first.`);
-      if (lead.status === "blacklisted") {
-        throw new Error(`@${lead.username} is blacklisted (${lead.blacklistReason ?? "no reason recorded"}).`);
+      if (alreadyHasHistory(lead)) {
+        throw new Error(`@${lead.username} already has history (status: ${lead.status}${lead.blacklistReason ? ", " + lead.blacklistReason : ""}). Not sending again.`);
       }
       const client = await getAuthorizedClient(account as string);
+      if (await hasExistingHistory(client, lead.username!)) {
+        markContacted(crm, lead.senderId, account as string);
+        saveCrm(crm);
+        throw new Error(`@${lead.username} already has message history on Telegram that the CRM didn't know about. Marked contacted; not sending.`);
+      }
       // کلیدِ جداگانه به‌ازای هر حساب: پیامِ سرنخ‌ها نباید منتظرِ نوبتِ کمپینِ
       // تبلیغاتی یا حساب دیگر بماند — هرکدام ساعتِ خودشان را دارند.
       const paced = await gate("leads_send", `leads:${account}`);
@@ -126,7 +151,7 @@ export function register(server: McpServer): void {
     {
       title: "Add hand-picked leads to the send queue",
       description:
-        "Adds specific, already-read leads to the outreach queue in priority order, each with the exact message to send them. This is for leads a person (or an agent, having read the actual post) decided are worth contacting — nothing goes in here by a formula. Skips anyone already queued.",
+        "Adds specific, already-read leads to the outreach queue in priority order, each with the exact message to send them. This is for leads a person (or an agent, having read the actual post) decided are worth contacting — nothing goes in here by a formula. Skips anyone already queued, and refuses anyone the CRM says already has history (contacted, replied, or blacklisted) — sync first if a name should be queueable but isn't.",
       inputSchema: {
         items: z.array(z.object({
           username: z.string().min(1),
@@ -136,7 +161,20 @@ export function register(server: McpServer): void {
         })).min(1),
       },
     },
-    async ({ items }) => ({ added: enqueue(items as never) }),
+    async ({ items }) => {
+      const crm = loadCrm();
+      const list = items as { username: string; priority: number; message: string; reason: string }[];
+      const refused: { username: string; status: string }[] = [];
+      const clean = list.filter((it) => {
+        const lead = findByUsername(crm, it.username);
+        if (alreadyHasHistory(lead)) {
+          refused.push({ username: it.username, status: lead!.status });
+          return false;
+        }
+        return true;
+      });
+      return { added: enqueue(clean as never), refused };
+    },
   );
 
   tool(
@@ -165,7 +203,7 @@ export function register(server: McpServer): void {
     {
       title: "Attempt the next queued send for one account",
       description:
-        "Checks that account's backoff state; if eligible, sends the next pending queue item as that account and records success or failure. On PEER_FLOOD/FLOOD_WAIT it escalates the backoff (1h, then 1d, then 1d, then weekly, giving up after 4 weekly attempts) rather than retrying blind. Any success resets the account straight back to normal pacing.",
+        "Checks that account's backoff state; if eligible, sends the next pending queue item as that account and records success or failure. Before sending, verifies (against the CRM and against Telegram's own message history) that this person has never been contacted — a queue item that turns out to already have history is skipped, not sent, and the search moves to the next pending item rather than burning the tick. On PEER_FLOOD/FLOOD_WAIT it escalates the backoff (1h, then 1d, then 1d, then weekly, giving up after 4 weekly attempts) rather than retrying blind. Any success resets the account straight back to normal pacing.",
       inputSchema: { account: z.string().min(1) },
     },
     async ({ account }) => {
@@ -174,35 +212,61 @@ export function register(server: McpServer): void {
       if (!isEligibleNow(backoff)) {
         return { attempted: false, stage: backoff.stage, nextAttemptAt: backoff.nextAttemptAt };
       }
-      const q = loadQueue();
-      const item = nextPending(q);
-      if (!item) return { attempted: false, reason: "queue is empty" };
+      const client = await getAuthorizedClient(acct);
 
-      try {
-        const client = await getAuthorizedClient(acct);
-        const paced = await gate("leads_queue", `leads:${acct}`);
-        const sent = await client.sendMessage(peer("@" + item.username), { message: item.message });
-        item.status = "sent";
-        item.sentAt = new Date().toISOString();
-        item.messageId = sent.id;
-        item.account = acct;
-        saveQueue(q);
+      // چند تلاش پشت‌سرهم برای رد شدن از موارد «قبلاً سابقه داشته‌ایم»، بدون
+      // اینکه یک تیک را کاملاً هدر بدهند یا حلقه‌ی بی‌پایان بسازند.
+      const skipped: { username: string; reason: string }[] = [];
+      for (let i = 0; i < 5; i++) {
+        const q = loadQueue();
+        const item = nextPending(q);
+        if (!item) {
+          return skipped.length
+            ? { attempted: false, reason: "queue is empty after skipping duplicates", skipped }
+            : { attempted: false, reason: "queue is empty" };
+        }
+
         const crm = loadCrm();
         const lead = findByUsername(crm, item.username);
-        if (lead) { markContacted(crm, lead.senderId, acct); saveCrm(crm); }
-        saveBackoff(acct, onSuccess());
-        return { attempted: true, sent: true, to: "@" + item.username, waitedMs: paced.waitedMs, messageId: sent.id };
-      } catch (err) {
-        const message = (err as Error).message;
-        if (/PEER_FLOOD|FLOOD_WAIT/.test(message)) {
-          const next = onFailure(backoff, message.slice(0, 160));
-          saveBackoff(acct, next);
-          return { attempted: true, sent: false, blocked: true, stage: next.stage, nextAttemptAt: next.nextAttemptAt, error: message.slice(0, 160) };
+        if (alreadyHasHistory(lead)) {
+          item.status = "skipped";
+          saveQueue(q);
+          skipped.push({ username: item.username, reason: `CRM already says ${lead!.status}` });
+          continue;
         }
-        item.status = "failed";
-        saveQueue(q);
-        throw err;
+        if (await hasExistingHistory(client, item.username)) {
+          item.status = "skipped";
+          saveQueue(q);
+          if (lead) markContacted(crm, lead.senderId, acct);
+          saveCrm(crm);
+          skipped.push({ username: item.username, reason: "Telegram already has message history the CRM didn't know about" });
+          continue;
+        }
+
+        try {
+          const paced = await gate("leads_queue", `leads:${acct}`);
+          const sent = await client.sendMessage(peer("@" + item.username), { message: item.message });
+          item.status = "sent";
+          item.sentAt = new Date().toISOString();
+          item.messageId = sent.id;
+          item.account = acct;
+          saveQueue(q);
+          if (lead) { markContacted(crm, lead.senderId, acct); saveCrm(crm); }
+          saveBackoff(acct, onSuccess());
+          return { attempted: true, sent: true, to: "@" + item.username, waitedMs: paced.waitedMs, messageId: sent.id, skipped: skipped.length ? skipped : undefined };
+        } catch (err) {
+          const message = (err as Error).message;
+          if (/PEER_FLOOD|FLOOD_WAIT/.test(message)) {
+            const next = onFailure(backoff, message.slice(0, 160));
+            saveBackoff(acct, next);
+            return { attempted: true, sent: false, blocked: true, stage: next.stage, nextAttemptAt: next.nextAttemptAt, error: message.slice(0, 160), skipped: skipped.length ? skipped : undefined };
+          }
+          item.status = "failed";
+          saveQueue(q);
+          throw err;
+        }
       }
+      return { attempted: false, reason: "too many already-contacted items in a row", skipped };
     },
   );
 }
