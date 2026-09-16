@@ -5,6 +5,10 @@ import {
   loadCrm, markContacted, rankLeads, saveCrm, syncFromRawLeads, tierOf,
   type LeadTier,
 } from "../leads.js";
+import {
+  enqueue, isEligibleNow, loadBackoff, loadQueue, nextPending, onFailure, onSuccess,
+  saveBackoff, saveQueue,
+} from "../leads-queue.js";
 import { gate } from "../throttle.js";
 import { getAuthorizedClient } from "../telegram.js";
 import { peer, tool } from "./util.js";
@@ -94,9 +98,10 @@ export function register(server: McpServer): void {
       inputSchema: {
         username: z.string().min(1),
         account: z.string().default("default"),
+        message: z.string().optional().describe("Use this exact text instead of the generic draft. A personalized message that references what the lead actually posted converts better than the template."),
       },
     },
-    async ({ username, account }) => {
+    async ({ username, account, message }) => {
       const crm = loadCrm();
       const lead = findByUsername(crm, username as string);
       if (!lead) throw new Error(`"${username}" is not in the lead CRM. Run telegram_leads_sync first.`);
@@ -104,12 +109,100 @@ export function register(server: McpServer): void {
         throw new Error(`@${lead.username} is blacklisted (${lead.blacklistReason ?? "no reason recorded"}).`);
       }
       const client = await getAuthorizedClient(account as string);
-      const paced = await gate("leads_send");
-      const text = draftOutreach(lead);
+      // کلیدِ جداگانه به‌ازای هر حساب: پیامِ سرنخ‌ها نباید منتظرِ نوبتِ کمپینِ
+      // تبلیغاتی یا حساب دیگر بماند — هرکدام ساعتِ خودشان را دارند.
+      const paced = await gate("leads_send", `leads:${account}`);
+      const text = (message as string | undefined) ?? draftOutreach(lead);
       const sent = await client.sendMessage(peer("@" + lead.username), { message: text });
       markContacted(crm, lead.senderId, account as string);
       saveCrm(crm);
       return { sent: true, to: "@" + lead.username, waitedMs: paced.waitedMs, messageId: sent.id };
+    },
+  );
+
+  tool(
+    server,
+    "leads_queue_add",
+    {
+      title: "Add hand-picked leads to the send queue",
+      description:
+        "Adds specific, already-read leads to the outreach queue in priority order, each with the exact message to send them. This is for leads a person (or an agent, having read the actual post) decided are worth contacting — nothing goes in here by a formula. Skips anyone already queued.",
+      inputSchema: {
+        items: z.array(z.object({
+          username: z.string().min(1),
+          priority: z.number().int().min(1).describe("Lower sends first"),
+          message: z.string().min(1),
+          reason: z.string().min(1).describe("Why this lead was picked, for the log"),
+        })).min(1),
+      },
+    },
+    async ({ items }) => ({ added: enqueue(items as never) }),
+  );
+
+  tool(
+    server,
+    "leads_queue_status",
+    {
+      title: "Queue and backoff status",
+      description: "Shows the send queue and each account's current backoff stage.",
+      inputSchema: { accounts: z.array(z.string()).default(["default", "outreach"]) },
+    },
+    async ({ accounts }) => {
+      const q = loadQueue();
+      const counts: Record<string, number> = {};
+      for (const i of q.items) counts[i.status] = (counts[i.status] ?? 0) + 1;
+      return {
+        queue: counts,
+        pendingNext: nextPending(q)?.username ?? null,
+        backoff: Object.fromEntries((accounts as string[]).map((a) => [a, loadBackoff(a)])),
+      };
+    },
+  );
+
+  tool(
+    server,
+    "leads_queue_tick",
+    {
+      title: "Attempt the next queued send for one account",
+      description:
+        "Checks that account's backoff state; if eligible, sends the next pending queue item as that account and records success or failure. On PEER_FLOOD/FLOOD_WAIT it escalates the backoff (1h, then 1d, then 1d, then weekly, giving up after 4 weekly attempts) rather than retrying blind. Any success resets the account straight back to normal pacing.",
+      inputSchema: { account: z.string().min(1) },
+    },
+    async ({ account }) => {
+      const acct = account as string;
+      const backoff = loadBackoff(acct);
+      if (!isEligibleNow(backoff)) {
+        return { attempted: false, stage: backoff.stage, nextAttemptAt: backoff.nextAttemptAt };
+      }
+      const q = loadQueue();
+      const item = nextPending(q);
+      if (!item) return { attempted: false, reason: "queue is empty" };
+
+      try {
+        const client = await getAuthorizedClient(acct);
+        const paced = await gate("leads_queue", `leads:${acct}`);
+        const sent = await client.sendMessage(peer("@" + item.username), { message: item.message });
+        item.status = "sent";
+        item.sentAt = new Date().toISOString();
+        item.messageId = sent.id;
+        item.account = acct;
+        saveQueue(q);
+        const crm = loadCrm();
+        const lead = findByUsername(crm, item.username);
+        if (lead) { markContacted(crm, lead.senderId, acct); saveCrm(crm); }
+        saveBackoff(acct, onSuccess());
+        return { attempted: true, sent: true, to: "@" + item.username, waitedMs: paced.waitedMs, messageId: sent.id };
+      } catch (err) {
+        const message = (err as Error).message;
+        if (/PEER_FLOOD|FLOOD_WAIT/.test(message)) {
+          const next = onFailure(backoff, message.slice(0, 160));
+          saveBackoff(acct, next);
+          return { attempted: true, sent: false, blocked: true, stage: next.stage, nextAttemptAt: next.nextAttemptAt, error: message.slice(0, 160) };
+        }
+        item.status = "failed";
+        saveQueue(q);
+        throw err;
+      }
     },
   );
 }
