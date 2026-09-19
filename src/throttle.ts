@@ -66,9 +66,9 @@ function writeAll(all: StateFile): void {
   writeFileSync(file, JSON.stringify(all, null, 2));
 }
 
-export function status(key = "global") {
+export function status(key = "global", intervalMsOverride?: number) {
   const state = readAll()[key] ?? {};
-  const interval = minIntervalMs();
+  const interval = intervalMsOverride ?? minIntervalMs();
   const last = state.lastActionAt ? new Date(state.lastActionAt).getTime() : 0;
   const waitMs = Math.max(0, last + interval - Date.now());
   return {
@@ -89,8 +89,8 @@ export function status(key = "global") {
  * to pace that account independently of everything else on the shared "global"
  * key.
  */
-export async function gate(kind: string, key = "global"): Promise<{ waitedMs: number }> {
-  const interval = minIntervalMs();
+export async function gate(kind: string, key = "global", intervalMsOverride?: number): Promise<{ waitedMs: number }> {
+  const interval = intervalMsOverride ?? minIntervalMs();
   const all = readAll();
   const state = all[key] ?? {};
   if (interval === 0) {

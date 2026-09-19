@@ -21,6 +21,44 @@ import { leadsDir } from "./leads.js";
 const queuePath = () => join(leadsDir(), "queue.json");
 const backoffPath = (account: string) => join(leadsDir(), `queue-backoff-${account}.json`);
 
+/**
+ * Both accounts got PEER_FLOOD'd twice in three days at a 10-minute cadence —
+ * SpamBot's own numbers say each hit the limit after roughly 2 cold DMs, not
+ * dozens, which means the interval that is safe for posting into groups you
+ * already belong to is nowhere near safe for messaging strangers first. These
+ * two knobs are deliberately conservative and independent of the campaign/
+ * general-purpose throttle: a slower minimum gap between cold sends, and a
+ * hard ceiling on how many one account will attempt in a rolling day even if
+ * nothing else has told it to stop.
+ */
+export const leadsMinIntervalMs = (): number => {
+  const raw = Number(process.env.TELEGRAM_LEADS_MIN_INTERVAL_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 90 * 60_000; // 90 minutes
+};
+
+export const leadsDailyCap = (): number => {
+  const raw = Number(process.env.TELEGRAM_LEADS_DAILY_CAP);
+  return Number.isFinite(raw) && raw > 0 ? raw : 3;
+};
+
+/** How many QueueItems this account has actually sent in the last 24h. */
+export function sentInLast24h(q: Queue, account: string): number {
+  const cutoff = Date.now() - 24 * 60 * 60_000;
+  return q.items.filter(
+    (i) => i.status === "sent" && i.account === account && i.sentAt && new Date(i.sentAt).getTime() >= cutoff,
+  ).length;
+}
+
+/** When the daily cap will next free up a slot, given the oldest send inside the window. */
+export function dailyCapClearsAt(q: Queue, account: string): string {
+  const cutoff = Date.now() - 24 * 60 * 60_000;
+  const inWindow = q.items
+    .filter((i) => i.status === "sent" && i.account === account && i.sentAt && new Date(i.sentAt).getTime() >= cutoff)
+    .sort((a, b) => new Date(a.sentAt!).getTime() - new Date(b.sentAt!).getTime());
+  const oldest = inWindow[0];
+  return oldest ? new Date(new Date(oldest.sentAt!).getTime() + 24 * 60 * 60_000).toISOString() : new Date().toISOString();
+}
+
 export interface QueueItem {
   username: string;
   priority: number; // lower sends first

@@ -7,10 +7,10 @@ import {
   type LeadTier,
 } from "../leads.js";
 import {
-  enqueue, isEligibleNow, loadBackoff, loadQueue, nextPending, onFailure, onSuccess,
-  saveBackoff, saveQueue,
+  dailyCapClearsAt, enqueue, isEligibleNow, leadsDailyCap, leadsMinIntervalMs, loadBackoff, loadQueue,
+  nextPending, onFailure, onSuccess, saveBackoff, saveQueue, sentInLast24h,
 } from "../leads-queue.js";
-import { gate } from "../throttle.js";
+import { gate, status } from "../throttle.js";
 import { getAuthorizedClient } from "../telegram.js";
 import { peer, tool } from "./util.js";
 
@@ -134,9 +134,24 @@ export function register(server: McpServer): void {
         saveCrm(crm);
         throw new Error(`@${lead.username} already has message history on Telegram that the CRM didn't know about. Marked contacted; not sending.`);
       }
+      const q = loadQueue();
+      const sentToday = sentInLast24h(q, account as string);
+      if (sentToday >= leadsDailyCap()) {
+        throw new Error(`@${account} has already sent ${sentToday} cold DM(s) in the last 24h (cap ${leadsDailyCap()}). Not sending — this cap exists because both accounts got PEER_FLOOD'd at higher volume. Try again after ${dailyCapClearsAt(q, account as string)}.`);
+      }
       // کلیدِ جداگانه به‌ازای هر حساب: پیامِ سرنخ‌ها نباید منتظرِ نوبتِ کمپینِ
-      // تبلیغاتی یا حساب دیگر بماند — هرکدام ساعتِ خودشان را دارند.
-      const paced = await gate("leads_send", `leads:${account}`);
+      // تبلیغاتی یا حساب دیگر بماند — هرکدام ساعتِ خودشان را دارند. فاصله‌ی
+      // پیام‌های سرد بسیار بیشتر از فاصله‌ی معمول است چون هر دو حساب با فاصله‌ی
+      // ۱۰ دقیقه‌ای بعد از تنها چند پیام سرد PEER_FLOOD شدند. این فاصله می‌تواند
+      // از سقفِ انتظارِ gate() بیشتر باشد، پس به‌جای بلاک‌شدنِ طولانی، همین‌جا
+      // با یک خطای روشن رد می‌شویم.
+      const leadsKey = `leads:${account}`;
+      const leadsInterval = leadsMinIntervalMs();
+      const st = status(leadsKey, leadsInterval);
+      if (!st.ready) {
+        throw new Error(`@${account} sent a cold DM too recently; next one is allowed in ${Math.ceil(st.readyIn / 60_000)}m.`);
+      }
+      const paced = await gate("leads_send", leadsKey, leadsInterval);
       const text = (message as string | undefined) ?? draftOutreach(lead);
       const sent = await client.sendMessage(peer("@" + lead.username), { message: text });
       markContacted(crm, lead.senderId, account as string);
@@ -203,7 +218,7 @@ export function register(server: McpServer): void {
     {
       title: "Attempt the next queued send for one account",
       description:
-        "Checks that account's backoff state; if eligible, sends the next pending queue item as that account and records success or failure. Before sending, verifies (against the CRM and against Telegram's own message history) that this person has never been contacted — a queue item that turns out to already have history is skipped, not sent, and the search moves to the next pending item rather than burning the tick. On PEER_FLOOD/FLOOD_WAIT it escalates the backoff (1h, then 1d, then 1d, then weekly, giving up after 4 weekly attempts) rather than retrying blind. Any success resets the account straight back to normal pacing.",
+        "Checks that account's backoff state and daily cap; if eligible, sends the next pending queue item as that account and records success or failure. Cold DMs are paced far slower than everything else this server does (90 minutes between sends by default, TELEGRAM_LEADS_MIN_INTERVAL_MS to override) and capped per account per rolling 24h (3 by default, TELEGRAM_LEADS_DAILY_CAP to override) — both accounts hit PEER_FLOOD twice in three days at the old 10-minute cadence, so this is deliberately conservative. Before sending, verifies (against the CRM and against Telegram's own message history) that this person has never been contacted — a queue item that turns out to already have history is skipped, not sent, and the search moves to the next pending item rather than burning the tick. On PEER_FLOOD/FLOOD_WAIT it escalates the backoff (1h, then 1d, then 1d, then weekly, giving up after 4 weekly attempts) rather than retrying blind. Any success resets the account straight back to normal pacing.",
       inputSchema: { account: z.string().min(1) },
     },
     async ({ account }) => {
@@ -211,6 +226,19 @@ export function register(server: McpServer): void {
       const backoff = loadBackoff(acct);
       if (!isEligibleNow(backoff)) {
         return { attempted: false, stage: backoff.stage, nextAttemptAt: backoff.nextAttemptAt };
+      }
+      const sentToday = sentInLast24h(loadQueue(), acct);
+      if (sentToday >= leadsDailyCap()) {
+        return { attempted: false, reason: `daily cap reached (${sentToday}/${leadsDailyCap()})`, nextAttemptAt: dailyCapClearsAt(loadQueue(), acct) };
+      }
+      // مثلِ leads_send: به‌جای بلاک‌شدنِ داخلِ gate() تا سقفِ انتظارش، همین‌جا
+      // زودتر بررسی می‌کنیم — فاصله‌ی موردنیاز برای پیام سرد می‌تواند از سقفِ
+      // gate() بیشتر باشد، و کرون هر ۱۰ دقیقه دوباره تلاش می‌کند.
+      const leadsKey = `leads:${acct}`;
+      const leadsInterval = leadsMinIntervalMs();
+      const pacing = status(leadsKey, leadsInterval);
+      if (!pacing.ready) {
+        return { attempted: false, reason: "pacing", readyIn: pacing.readyIn };
       }
       const client = await getAuthorizedClient(acct);
 
@@ -244,7 +272,7 @@ export function register(server: McpServer): void {
         }
 
         try {
-          const paced = await gate("leads_queue", `leads:${acct}`);
+          const paced = await gate("leads_queue", `leads:${acct}`, leadsMinIntervalMs());
           const sent = await client.sendMessage(peer("@" + item.username), { message: item.message });
           item.status = "sent";
           item.sentAt = new Date().toISOString();
