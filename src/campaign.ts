@@ -44,6 +44,8 @@ export interface Group {
   account: string;
   enabled: boolean;
   note?: string;
+  /** A word the ad asks repliers to mention, so an enquiry can be traced back to the room it came from. */
+  ref?: string;
 }
 
 export interface Variant {
@@ -127,7 +129,7 @@ export const saveLedger = (ledger: Ledger, campaign?: string) => writeJson("ledg
  * into two Istanbul groups, which tells the reader immediately that the ad was
  * not written for them.
  */
-export function render(text: string, offer: Offer, region: string, lang = "fa"): string {
+export function render(text: string, offer: Offer, region: string, lang = "fa", ref = ""): string {
   const prices = offer.regions[region] ?? Object.values(offer.regions)[0];
   if (!prices) throw new Error(`No price list for region "${region}".`);
   const loc = lang === "en" && offer.en ? offer.en : {};
@@ -141,7 +143,8 @@ export function render(text: string, offer: Offer, region: string, lang = "fa"):
     .replaceAll("{{contact}}", contact)
     .replaceAll("{{examples}}", examples.join("\n"))
     .replaceAll("{{includes}}", includes.map((i) => `• ${i}`).join("\n"))
-    .replaceAll("{{guarantees}}", guarantees.map((g) => `✅ ${g}`).join("\n"));
+    .replaceAll("{{guarantees}}", guarantees.map((g) => `✅ ${g}`).join("\n"))
+    .replaceAll("{{ref}}", ref);
 }
 
 const successful = (ledger: Ledger) => ledger.posts.filter((p) => !p.error);
