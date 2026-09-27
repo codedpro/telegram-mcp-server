@@ -25,6 +25,9 @@ const AD = new RegExp(
     "affordable", "professional", "fully insured", "free estimate", "quote", "per hour", "\\bhire\\b",
     "lessons", "tutoring", "catering", "cleaning", "removals", "plumb", "electrician", "salon", "barber",
     "repairs?", "installation", "landlord", "to let", "for rent", "£\\d", "\\$\\d", "€\\d", "aed ?\\d",
+    "услуг", "стоимост", "\\bцен[аы]\\b", "заказ", "скидк", "доставк", "обращайтесь", "пишите в (лс|личку|директ)",
+    "запись", "консультац", "продаю", "продажа", "аренд", "сдаю", "ремонт", "маникюр", "салон", "недвижимост",
+    "предлагаю", "предлагаем", "оказываем", "под ключ", "гарантия", "бесплатн", "\\bруб\\b", "дирхам",
   ].join("|"),
   "i",
 );
@@ -34,7 +37,7 @@ const NOT_AD =
   /سلام ?به ?همه|کسی ?میدونه|کسی ?اطلاع|سوال ?داشتم|ببخشید|قوانین ?گروه|ادمین ?گروه|لینک ?گروه|تبریک|تسلیت|خبر ?فوری|https?:\/\/t\.me\/joinchat|فقط ?سوال|hi everyone|group rules|welcome to the group/i;
 
 /** Someone asking for a trade, not offering one — a mention of "plumber" here is a request. */
-const ASKING = /\b(anyone know|does anyone|can anyone|could anyone|any recommendations?|recommend (a|an|me)|looking for (a|an) (good|reliable))\b/i;
+const ASKING = /\b(anyone know|does anyone|can anyone|could anyone|any recommendations?|recommend (a|an|me)|looking for (a|an) (good|reliable))\b|подскажите|посоветуйте|кто знает|кто может посоветовать|ищу (хорошего|надежного|надёжного)/i;
 
 export interface Advertiser {
   /** The account that posted — the contact that actually matters. */
