@@ -148,10 +148,14 @@ export function render(text: string, offer: Offer, region: string, lang = "fa", 
     .replaceAll("{{ref}}", ref);
 }
 
+/** A post the group deleted the moment it arrived. Retrying every tick would be spam, so it starts the cooldown like a real post. */
+export const REMOVED_INSTANTLY = "POST_REMOVED_INSTANTLY";
+
 const successful = (ledger: Ledger) => ledger.posts.filter((p) => !p.error);
+const attempted = (ledger: Ledger) => ledger.posts.filter((p) => !p.error || p.error.startsWith(REMOVED_INSTANTLY));
 
 export function lastPostTo(ledger: Ledger, group: string): PostRecord | undefined {
-  return successful(ledger)
+  return attempted(ledger)
     .filter((p) => p.group === group)
     .sort((a, b) => b.at.localeCompare(a.at))[0];
 }

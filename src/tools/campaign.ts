@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   daysSince, lastPostTo, loadCopy, loadGroups, loadLedger, planAhead, planNext,
-  recordPost, render, saveGroups,
+  recordPost, REMOVED_INSTANTLY, render, saveGroups,
 } from "../campaign.js";
 import { gate } from "../throttle.js";
 import { getAuthorizedClient } from "../telegram.js";
@@ -146,6 +146,11 @@ export function register(server: McpServer): void {
           }
         } else {
           sent = await client.sendMessage(target, { message: text });
+        }
+        if (!sent) {
+          // Telegram accepted the send but the message never appeared: an
+          // anti-spam bot or an approval queue removed it on arrival.
+          throw new Error(`${REMOVED_INSTANTLY}: @${plan.group.username} removed the post as soon as it arrived (anti-spam bot or approval queue).`);
         }
         recordPost(ledger, {
           group: plan.group.username,

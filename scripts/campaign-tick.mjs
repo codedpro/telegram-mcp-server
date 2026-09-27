@@ -157,6 +157,19 @@ async function main() {
       log(`${plan.group}: cannot post${off ? " — disabled in roster" : ""} (${message.slice(0, 90)})`);
       return;   // گروه غیرفعال شد؛ این هم خرابیِ کمپین نیست
     }
+    // The group deleted the post on arrival (anti-spam bot or approval queue).
+    // The attempt already starts that group's cooldown, so it gets one more
+    // try after it — new-member restrictions often lift — and is disabled on
+    // the second removal rather than retried into a ban.
+    if (/POST_REMOVED_INSTANTLY/.test(message)) {
+      const username = plan.group.replace(/^@/, "");
+      const ledgerPath = join(root, "data", "campaign", CAMPAIGN, "ledger.json");
+      const removals = JSON.parse(readFileSync(ledgerPath, "utf8")).posts
+        .filter((p) => p.group === username && /POST_REMOVED_INSTANTLY/.test(p.error ?? "")).length;
+      const off = removals >= 2 && disableGroup(username, `removes our posts on arrival (${removals}x)`);
+      log(`${plan.group}: post removed on arrival (${removals}x)${off ? " — disabled in roster" : ", will retry after its cooldown"}`);
+      return;
+    }
     // slowmode یعنی «الان نه»، نه «هرگز». گروه سالم است؛ نوبتِ بعدی می‌گیردش.
     if (/SLOWMODE_WAIT/.test(message)) {
       log(`${plan.group}: slow mode, skipping this tick`);
