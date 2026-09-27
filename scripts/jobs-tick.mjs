@@ -53,7 +53,7 @@ const SCORE = [
  * automatically, this only feeds the hand-picked DM queue.
  */
 const CLIENT_NEED =
-  /(طراحی|طراح|ساخت|راه ?اندازی|ایجاد|بازطراحی|توسعه|پشتیبانی) ?(یک |یه )?(سایت|وب ?سایت|فروشگاه|اپلیکیشن|ربات|لندینگ)|سئو|\bseo\b|دیجیتال ?مارکتینگ|digital marketing|گوگل ادز|google ads|وردپرس|wordpress|ووکامرس|فروشگاه (اینترنتی|آنلاین)|سایت (فروشگاهی|شرکتی|شخصی|اختصاصی|کلینیک)|چت ?بات|chatbot|website|e-?commerce/i;
+  /(طراحی|طراح|ساخت|راه ?اندازی|ایجاد|بازطراحی|توسعه|پشتیبانی) ?(یک |یه )?(سایت|وب ?سایت|فروشگاه|اپلیکیشن|ربات|لندینگ)|سئو|\bseo\b|دیجیتال ?مارکتینگ|digital marketing|گوگل ادز|google ads|وردپرس|wordpress|ووکامرس|فروشگاه (اینترنتی|آنلاین)|سایت (فروشگاهی|شرکتی|شخصی|اختصاصی|کلینیک)|چت ?بات|chatbot|website|e-?commerce|web ?(developer|design(er)?)|shopify|woocommerce|landing page|online store|need (a|an) (site|developer|designer)|looking for (a|an) (web|wordpress|shopify|seo)/i;
 /** Hiring posts for roles we do not sell, and referral schemes. */
 const OFF_TARGET =
   /ادمین|تولید (و انتشار )?محتوا|ادیتور|تماس[_ ]?تلفنی|انجام ?دهنده|کار ?آموز|آهنگ|نماهنگ|پورسانت|درصد مبلغ|معرفی کنن|مسئول[_ ]?کنترل|سوشال ?مدیا|برندینگ/i;
