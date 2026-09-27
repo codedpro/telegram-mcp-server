@@ -65,7 +65,7 @@ export interface Region {
   currencyNote?: string;
 }
 
-/** English wording for the same offer. Falls back to the Persian fields. */
+/** Wording for the same offer in another language (English, Russian). Falls back to the Persian fields. */
 export interface OfferLocale {
   contact?: string;
   examples?: string[];
@@ -76,6 +76,7 @@ export interface OfferLocale {
 export interface Offer {
   regions: Record<string, Region>;
   en?: OfferLocale;
+  ru?: OfferLocale;
   contact: string;
   /** Real, reachable sites. Proof belongs in the ad, not behind a DM. */
   examples: string[];
@@ -132,7 +133,7 @@ export const saveLedger = (ledger: Ledger, campaign?: string) => writeJson("ledg
 export function render(text: string, offer: Offer, region: string, lang = "fa", ref = ""): string {
   const prices = offer.regions[region] ?? Object.values(offer.regions)[0];
   if (!prices) throw new Error(`No price list for region "${region}".`);
-  const loc = lang === "en" && offer.en ? offer.en : {};
+  const loc: OfferLocale = (lang === "en" && offer.en) || (lang === "ru" && offer.ru) || {};
   const contact = loc.contact ?? offer.contact;
   const examples = loc.examples ?? offer.examples;
   const includes = loc.includes ?? offer.includes;
