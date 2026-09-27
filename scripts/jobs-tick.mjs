@@ -22,6 +22,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const reportPath = join(root, "data", "scans", "new-jobs.md");
+const clientsPath = join(root, "data", "scans", "new-clients.md");
 
 const stamp = () => new Date().toLocaleString("sv-SE");
 const log = (m) => console.log(`${stamp()}  ${m}`);
@@ -44,6 +45,20 @@ const SCORE = [
   [/هوش ?مصنوعی|\bai\b|\bllm\b|automation/i, 5, "AI"],
   [/ربات ?تلگرام/i, 5, "Bot"],
 ];
+
+/**
+ * Someone asking for what we sell (a site, a shop, SEO, marketing, AI work) —
+ * a customer to message, as opposed to a job to apply for. Staff hiring and
+ * freelancers advertising themselves are excluded; nobody is messaged
+ * automatically, this only feeds the hand-picked DM queue.
+ */
+const CLIENT_NEED =
+  /(طراحی|طراح|ساخت|راه ?اندازی|ایجاد|بازطراحی|توسعه|پشتیبانی) ?(یک |یه )?(سایت|وب ?سایت|فروشگاه|اپلیکیشن|ربات|لندینگ)|سئو|\bseo\b|دیجیتال ?مارکتینگ|digital marketing|گوگل ادز|google ads|وردپرس|wordpress|ووکامرس|فروشگاه (اینترنتی|آنلاین)|سایت (فروشگاهی|شرکتی|شخصی|اختصاصی|کلینیک)|چت ?بات|chatbot|website|e-?commerce/i;
+/** Hiring posts for roles we do not sell, and referral schemes. */
+const OFF_TARGET =
+  /ادمین|تولید (و انتشار )?محتوا|ادیتور|تماس[_ ]?تلفنی|انجام ?دهنده|کار ?آموز|آهنگ|نماهنگ|پورسانت|درصد مبلغ|معرفی کنن|مسئول[_ ]?کنترل|سوشال ?مدیا|برندینگ/i;
+const STAFF_HIRE = /استخدام|حقوق|بیمه|تمام ?وقت|پاره ?وقت|حضوری|ساعت کاری|وزارت کار|full.?time|part.?time|salary|محل کار/i;
+const SELLS_SELF = /انجام ?(می ?دهم|میدم|میشه)|سفارش ?(می ?پذیرم|پذیرفته)|پذیرش سفارش|اکانت|اشتراک|خدمات ما|تخفیف ویژه/i;
 
 const CHANNELS =
   /^@(cproje|Hajifreelance|doorkarijoo|mihan_proje|project_board|FreelancerH|Daneshjoo_Com|freelancer_job|DorkariLand|SevenProzhe|ProzheLancer|weproje|Freelaancing|AloFreelancer|AloJobs|uprojeh|projeh_2400|freelancer_booth|doorkaari|kardidjob|Freelancersho_ir|tarahanwebsitee|Collegian_Projection)$/i;
@@ -111,6 +126,20 @@ async function main() {
       ranked.push({ ...item, score, tags, contact: handles[0] });
     }
     ranked.sort((a, b) => b.score - a.score);
+
+    const clients = [];
+    for (const item of JSON.parse(read.text).items) {
+      const t = item.text ?? "";
+      if (!CLIENT_NEED.test(t) || OFF_TARGET.test(t) || STAFF_HIRE.test(t) || SEEKER.test(t) || SELLS_SELF.test(t)) continue;
+      const handles = [...new Set(t.match(/@[A-Za-z0-9_]{5,}/g) ?? [])].filter((h) => !CHANNELS.test(h) && !/bot$/i.test(h));
+      if (handles.length) clients.push({ ...item, contact: handles[0] });
+    }
+    if (clients.length) {
+      const block = [`\n## ${stamp()} — ${clients.length} possible customers, scan ${s.id}\n`];
+      for (const j of clients) block.push(`- ${j.contact} — ${j.link}\n  ${j.text.replace(/\s+/g, " ").slice(0, 220)}`);
+      appendFileSync(clientsPath, block.join("\n") + "\n");
+    }
+    log(`${clients.length} possible customers -> ${clientsPath}`);
 
     log(`${s.totals.matched} new, ${ranked.length} worth a look (skipped ${s.ledger.skippedAlreadySeen} already seen)`);
     if (!ranked.length) return;
