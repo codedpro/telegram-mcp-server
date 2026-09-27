@@ -52,39 +52,35 @@ export function classify(text: string): BusinessType | null {
 }
 
 /** One line specific to the trade — this is what makes the message read as written for them. */
-const PITCH: Record<string, string> = {
-  exchange: "نرخ‌ها رو هر روز دستی توی گروه‌ها می‌فرستید. یک سایت با صفحه‌ی نرخ که خودکار آپدیت بشه، هم کار روزانه‌تون رو حذف می‌کنه و هم توی گوگل برای «صرافی» شهرتون دیده می‌شید.",
-  food: "سفارش‌ها از دایرکت و واتساپ میاد و پیگیری‌شون سخته. یک سایت سفارش‌گیری ساده با منو، به‌علاوه دیده‌شدن توی گوگل مپ، سفارش‌ها رو مرتب می‌کنه.",
-  clinic: "بیمار جدید معمولاً اول گوگل رو می‌گرده. یک سایت با صفحه‌ی خدمات و رزرو نوبت آنلاین، به‌علاوه سئوی محلی، ورودی بیمار رو از جست‌وجو میاره.",
-  legal: "این حوزه کاملاً جست‌وجومحوره. یک سایت با صفحه‌ی جداگانه برای هر خدمت و فرم دریافت پرونده، سرنخ‌ها رو از گوگل مستقیم میاره سراغتون.",
-  retail: "یک فروشگاه آنلاین با پرداخت و ارسال، فروش رو از محدوده‌ی گروه‌های تلگرام میاره بیرون.",
-  beauty: "نوبت‌ها از دایرکت میاد و وقت می‌بره. یک صفحه‌ی رزرو آنلاین به‌علاوه دیده‌شدن در گوگل مپ، نوبت‌ها رو خودکار می‌کنه.",
-  trades: "مشتری این کار رو توی گوگل سرچ می‌کنه، نه تلگرام. یک سایت کوچک با نمونه‌کار و فرم درخواست قیمت، به‌علاوه سئوی محلی، کار ثابت میاره.",
-  transport: "یک سایت با فرم استعلام قیمت و صفحه‌ی مسیرها، هم استعلام‌ها رو منظم می‌کنه و هم برای جست‌وجوی حمل‌ونقل بالا میاردتون.",
-  education: "یک صفحه‌ی دوره با ثبت‌نام آنلاین، به‌علاوه محتوای سئوشده، شاگرد رو از گوگل میاره به‌جای اینکه فقط از گروه بیاد.",
-  realestate: "یک سایت با لیست ملک‌ها و فیلتر، به‌علاوه سئوی محلی، فایل‌هاتون رو جلوی کسی می‌ذاره که همین الان دنبال خونه‌ست.",
-  crypto: "یک سایت با صفحه‌ی نرخ لحظه‌ای و اعتمادسازی (درباره‌ی ما، نظرات، مجوز) تفاوت بزرگی در جذب مشتری جدید می‌سازه.",
+/**
+ * One question per trade, not a pitch. Leads kept answering the old
+ * paragraph-long drafts with silence and telling us it read like AI: a signed
+ * intro, a benefit paragraph and a closing offer is exactly the shape of a
+ * generated message. A short note that asks something a person would ask gets
+ * a reply; the offer rides along in one line.
+ */
+const QUESTION: Record<string, string> = {
+  exchange: "سایت هم دارید یا فقط تلگرام؟",
+  food: "سفارش‌ها رو فقط از دایرکت و واتساپ می‌گیرید یا منوی آنلاین هم دارید؟",
+  clinic: "برای نوبت، مراجعه‌کننده‌ها فقط پیام می‌دن یا رزرو آنلاین هم دارید؟",
+  legal: "مشتری‌ها بیشتر از همین گروه‌ها میان یا از گوگل هم پیداتون می‌کنن؟",
+  retail: "فقط توی تلگرام و اینستا می‌فروشید یا فروشگاه آنلاین هم دارید؟",
+  beauty: "نوبت‌ها رو از دایرکت می‌گیرید یا رزرو آنلاین دارید؟",
+  trades: "مشتری‌ها از گوگل هم پیداتون می‌کنن یا فقط از گروه‌ها؟",
+  transport: "استعلام قیمت‌ها فقط از پیام میاد یا سایت هم دارید؟",
+  education: "ثبت‌نام‌ها رو از کجا می‌گیرید؟ سایت دارید؟",
+  realestate: "لیست فایل‌هاتون جایی آنلاین هست که مشتری خودش ببینه؟",
+  crypto: "سایت هم دارید یا فقط تلگرام؟",
 };
 
-const GENERIC_FA = "یک سایت درست به‌علاوه دیده‌شدن در گوگل، معمولاً مشتری‌هایی رو میاره که هیچ‌وقت گروه‌های تلگرام رو نمی‌بینن.";
+const GENERIC_QUESTION = "سایت هم دارید یا مشتری‌ها فقط از تلگرام میان؟";
 
-const firstName = (name: string): string => {
-  const w = String(name || "")
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, " ")
-    .split(/[\s._|/\\-]+/)
-    .map((x) => x.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
-    .filter(Boolean);
-  const titles = /^(dr|mr|mrs|ms|eng|prof|دکتر|مهندس|استاد|آقای|خانم)\.?$/i;
-  const first = w.find((x) => !titles.test(x)) ?? "";
-  return first.length >= 2 && /\p{L}/u.test(first) ? first : "";
-};
+export const OFFER_LINE = "ما سایت می‌سازیم که تو گوگل دیده بشه، پولش هم ۱۲ ماهه قسطیه. نمونه‌ها: code-nest.dev";
 
-/** Direct-message draft: names the group where the post was seen, then the trade-specific pitch. */
+/** Fallback direct message when no hand-written one is given: greeting, one question, one line of offer. */
 export function draftOutreach(lead: CrmEntry): string {
-  const who = firstName(lead.name);
-  const group = lead.chats[0] ?? "";
-  const pitch = (lead.businessKey && PITCH[lead.businessKey]) || GENERIC_FA;
-  return `سلام${who ? " " + who : ""} 👋\n\nپست‌هاتون رو در ${group} دیدم.\n\nمن امیرحسین نوری هستم، مهندس نرم‌افزار. برای کسب‌وکارهای کوچک سایت می‌سازم و سئوشون رو می‌گردونم؛ خودم چند فروشگاه آنلاین در بریتانیا رو راه انداختم و مدیریت می‌کنم.\n\n${pitch}\n\nاگر به‌دردتون می‌خوره، خوشحال می‌شم یک نگاه به وضعیت فعلی‌تون بندازم و صادقانه بگم اصلاً ارزش انجام داره یا نه. بابت این بخش هزینه‌ای نیست.`;
+  const question = (lead.businessKey && QUESTION[lead.businessKey]) || GENERIC_QUESTION;
+  return `سلام، وقت بخیر\nآگهی‌تون رو توی گروه دیدم. ${question}\n\n${OFFER_LINE}`;
 }
 
 export interface CrmEntry {
