@@ -20,13 +20,21 @@ const AD = new RegExp(
     "تخفیف", "رایگان ?مشاوره", "بهترین ?قیمت", "کیفیت ?عالی", "همکاری ?می ?پذیریم",
     "we offer", "our service", "book now", "contact us", "\\bdm me\\b", "whatsapp",
     "discount", "delivery", "free quote", "best price", "available for hire",
+    "\\bservices?\\b", "for sale", "\\bprices?\\b", "\\border now\\b", "call us", "call now", "message me",
+    "\\bpm me\\b", "inbox me", "\\bbook(ing)? (an? )?(appointment|slot|now)", "we provide", "we specialise", "we specialize",
+    "affordable", "professional", "fully insured", "free estimate", "quote", "per hour", "\\bhire\\b",
+    "lessons", "tutoring", "catering", "cleaning", "removals", "plumb", "electrician", "salon", "barber",
+    "repairs?", "installation", "landlord", "to let", "for rent", "£\\d", "\\$\\d", "€\\d", "aed ?\\d",
   ].join("|"),
   "i",
 );
 
 /** Job-seeking, chit-chat and group admin noise that also mentions money. */
 const NOT_AD =
-  /سلام ?به ?همه|کسی ?میدونه|کسی ?اطلاع|سوال ?داشتم|ببخشید|قوانین ?گروه|ادمین ?گروه|لینک ?گروه|تبریک|تسلیت|خبر ?فوری|https?:\/\/t\.me\/joinchat|فقط ?سوال/i;
+  /سلام ?به ?همه|کسی ?میدونه|کسی ?اطلاع|سوال ?داشتم|ببخشید|قوانین ?گروه|ادمین ?گروه|لینک ?گروه|تبریک|تسلیت|خبر ?فوری|https?:\/\/t\.me\/joinchat|فقط ?سوال|hi everyone|group rules|welcome to the group/i;
+
+/** Someone asking for a trade, not offering one — a mention of "plumber" here is a request. */
+const ASKING = /\b(anyone know|does anyone|can anyone|could anyone|any recommendations?|recommend (a|an|me)|looking for (a|an) (good|reliable))\b/i;
 
 export interface Advertiser {
   /** The account that posted — the contact that actually matters. */
@@ -59,6 +67,7 @@ const clean = (v: string) => v.replace(/\s+/g, " ").trim();
 
 export function looksLikeAd(text: string): boolean {
   if (text.length < 25) return false;
+  if (ASKING.test(text)) return false;
   if (NOT_AD.test(text) && !AD.test(text)) return false;
   return AD.test(text);
 }
