@@ -64,10 +64,19 @@ export function listAccounts(): AccountMeta[] {
     });
 }
 
+/**
+ * The account this process switched to. The file below is shared by every
+ * process (cron ticks run side by side), so reading it on each call let one
+ * tick's switch silently move another tick onto the wrong account mid-run.
+ * Once a process has chosen, its choice wins; the file only seeds the default.
+ */
+let processActive: string | undefined;
+
 export function activeAccount(): string {
   migrateLegacy();
   const fromEnv = process.env.TELEGRAM_ACCOUNT;
   if (fromEnv) return safe(fromEnv);
+  if (processActive) return processActive;
   try {
     const value = readFileSync(activePath(), "utf8").trim();
     if (value) return value;
@@ -88,6 +97,7 @@ export function setActiveAccount(name: string): string {
   }
   ensureDir();
   writeFileSync(activePath(), clean + "\n", { mode: 0o600 });
+  processActive = clean;
   return clean;
 }
 
@@ -140,6 +150,7 @@ export function markActive(name: string): void {
   const clean = safe(name);
   ensureDir();
   writeFileSync(activePath(), clean + "\n", { mode: 0o600 });
+  processActive = clean;
 }
 
 export function saveAccountMeta(meta: AccountMeta): void {
@@ -154,6 +165,7 @@ export function clearSession(name = activeAccount()): void {
   const clean = safe(name);
   rmSync(sessionPath(clean), { force: true });
   rmSync(metaPath(clean), { force: true });
+  if (processActive === clean) processActive = undefined;
   const remaining = listAccounts();
   if (remaining.length) writeFileSync(activePath(), remaining[0].name + "\n", { mode: 0o600 });
   else rmSync(activePath(), { force: true });
