@@ -12,6 +12,7 @@ import {
 } from "../leads-queue.js";
 import { gate, status } from "../throttle.js";
 import { getAuthorizedClient } from "../telegram.js";
+import { listAccounts } from "../session.js";
 import { peer, tool } from "./util.js";
 
 /**
@@ -31,6 +32,25 @@ async function hasExistingHistory(client: TelegramClient, username: string): Pro
     // نبودِ دسترسی به تاریخچه نباید جلوِ ارسال را بگیرد؛ فقط یعنی نمی‌دانیم.
     return false;
   }
+}
+
+/**
+ * "Already has history with us" means with any of our accounts, not only the
+ * one about to send: otherwise a person the main account already spoke to
+ * gets a second cold message from the other account.
+ */
+async function historyWithAnyAccount(sending: TelegramClient, username: string): Promise<boolean> {
+  if (await hasExistingHistory(sending, username)) return true;
+  for (const { name } of listAccounts()) {
+    let other: TelegramClient;
+    try {
+      other = await getAuthorizedClient(name);
+    } catch {
+      continue;
+    }
+    if (other !== sending && (await hasExistingHistory(other, username))) return true;
+  }
+  return false;
 }
 
 export function register(server: McpServer): void {
@@ -129,7 +149,7 @@ export function register(server: McpServer): void {
         throw new Error(`@${lead.username} already has history (status: ${lead.status}${lead.blacklistReason ? ", " + lead.blacklistReason : ""}). Not sending again.`);
       }
       const client = await getAuthorizedClient(account as string);
-      if (await hasExistingHistory(client, lead.username!)) {
+      if (await historyWithAnyAccount(client, lead.username!)) {
         markContacted(crm, lead.senderId, account as string);
         saveCrm(crm);
         throw new Error(`@${lead.username} already has message history on Telegram that the CRM didn't know about. Marked contacted; not sending.`);
@@ -262,7 +282,7 @@ export function register(server: McpServer): void {
           skipped.push({ username: item.username, reason: `CRM already says ${lead!.status}` });
           continue;
         }
-        if (await hasExistingHistory(client, item.username)) {
+        if (await historyWithAnyAccount(client, item.username)) {
           item.status = "skipped";
           saveQueue(q);
           if (lead) markContacted(crm, lead.senderId, acct);
